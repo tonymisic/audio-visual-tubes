@@ -10,7 +10,7 @@ import numpy as np
 import json
 import argparse, torch.optim as optim 
 from model import AVENet
-from datasets import WholeVideoDataset
+from datasets import GetAudioVideoDataset
 import cv2
 from sklearn.metrics import auc
 from losses import HardWayLoss
@@ -54,7 +54,7 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=0.0001) # from paper
 
     # dataloader
-    trainset = WholeVideoDataset(args, mode='train')
+    trainset = GetAudioVideoDataset(args, mode='train')
     traindataloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers = 16)
     print("Loaded dataloader.")
 

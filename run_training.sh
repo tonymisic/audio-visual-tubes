@@ -1,4 +1,4 @@
-python video_quantify.py \
+python train.py \
 --testset "flickr" \
 --data_path "ExampleVideos/" \
 --gt_path "ExampleVideos/annotations/" \

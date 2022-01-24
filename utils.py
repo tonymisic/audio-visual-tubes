@@ -6,9 +6,9 @@ import torchvision
 from torchvision.transforms import *
 from scipy import stats
 from sklearn import metrics
+import sklearn
 import numpy as np
 import xml.etree.ElementTree as ET
-
 
 class Evaluator():
 
@@ -22,7 +22,6 @@ class Evaluator():
         ciou = np.sum(infer_map*gtmap) / (np.sum(gtmap)+np.sum(infer_map*(gtmap==0)))
         self.ciou.append(ciou)
         return ciou, np.sum(infer_map*gtmap),(np.sum(gtmap)+np.sum(infer_map*(gtmap==0)))
-
 
     def cal_AUC(self):
         results = []
@@ -42,13 +41,11 @@ class Evaluator():
     def clear(self):
         self.ciou = []
 
-
 def normalize_img(value, vmax=None, vmin=None):
     vmin = value.min() if vmin is None else vmin
     vmax = value.max() if vmax is None else vmax
     if not (vmax - vmin) == 0:
         value = (value - vmin) / (vmax - vmin)  # vmin..vmax
-
     return value
 
 def testset_gt(args,name):
