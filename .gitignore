@@ -1,3 +1,15 @@
+.vscode/
+__pycache__/
+audio/
+ExampleVideos/
+datasets/FLICKR/
+datasets/VGGSS/
+datasets/Dataset.tar.gz
+metadata/urls_public.txt
+pretrained/
+imgs/
+videos/
+*__pycache__/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
