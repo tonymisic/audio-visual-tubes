@@ -9,11 +9,12 @@ from utils import *
 import numpy as np
 import json
 import argparse, torch.optim as optim 
-from model import AVENet
+from model import FullModel
 from datasets import WholeVideoDataset
 import cv2
 from sklearn.metrics import auc
 from losses import HardWayLoss
+from PIL import Image
 
 def get_arguments():
     parser = argparse.ArgumentParser()
@@ -29,33 +30,24 @@ def get_arguments():
     parser.set_defaults(tri_map=True)
     parser.add_argument('--Neg',action='store_true')
     parser.set_defaults(Neg=True)
-
     return parser.parse_args() 
 
 def main():
     args = get_arguments()
-
     os.environ["CUDA_VISIBLE_DEVICES"]="6,7"
 
     # load model
-    model= AVENet(args) 
+    model = FullModel(args) 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = nn.DataParallel(model)
-    model = model.cuda()
-    #checkpoint = torch.load(args.summaries_dir)
-    #model_dict = model.state_dict()
-    #pretrained_dict = checkpoint['model_state_dict']
-    #model_dict.update(pretrained_dict)
-    #model.load_state_dict(model_dict)
+    model = nn.DataParallel(model).cuda()
     model.to(device)
-    #print('load pretrained model.')
     criterion = HardWayLoss()
     criterion.to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.0001) # from paper
 
     # dataloader
     trainset = WholeVideoDataset(args, mode='train')
-    traindataloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers = 16)
+    traindataloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, num_workers = 1)
     print("Loaded dataloader.")
 
     # gt for vggss
@@ -68,38 +60,20 @@ def main():
 
     iou = []
     running_loss = 0.0
-    for step, (image, spec, audio, name, im) in enumerate(traindataloader):
-        print('%d / %d' % (step,len(traindataloader) - 1))
+    for step, (frames, spec, audio, samplerate, name) in enumerate(traindataloader):
+        print('%d / %d' % (step, len(traindataloader) - 1))
         spec = Variable(spec).cuda()
-        image = Variable(image).cuda()
-        heatmap,_,Pos,Neg = model(image.float(), spec.float(), args)
-        heatmap_arr =  heatmap.data.cpu().numpy()
-        loss = optimizer(Pos, Neg)
-        loss.backward()
-        running_loss += float(loss)
-
-        for i in range(spec.shape[0]):
-            heatmap_now = cv2.resize(heatmap_arr[i,0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
-            heatmap_now = normalize_img(-heatmap_now)
-            gt_map = testset_gt(args,name[i])
-            pred = 1 - heatmap_now
-            threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
-            pred[pred>threshold]  = 1
-            pred[pred<1] = 0
-            evaluator = Evaluator()
-            ciou,inter,union = evaluator.cal_CIOU(pred,gt_map,0.5)
-            iou.append(ciou)
-
-    print("Loss for epoch: " + str(running_loss / step))
-    results = []
-    for i in range(21):
-        result = np.sum(np.array(iou) >= 0.05 * i)
-        result = result / len(iou)
-        results.append(result)
-    x = [0.05 * i for i in range(21)]
-    auc_ = auc(x, results)
-    print('cIoU' , np.sum(np.array(iou) >= 0.5) / len(iou))
-    print('auc',auc_)
-
+        attention_map = model(spec.float(), frames)
+        for sample in range(attention_map.size(0)):
+            for frame in range(attention_map.size(1)):
+                heatmap_now = cv2.resize(attention_map[sample,frame].cpu().detach().numpy(), dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                #heatmap_now = normalize_img(-heatmap_now)
+                #image_now = normalize_img(frames[sample, frame])
+                #im = Image.fromarray(image_now[0][0].cpu().numpy() * 255).convert('RGB')
+                colored_map = cv2.applyColorMap(np.uint8(heatmap_now * 255), cv2.COLORMAP_JET)
+                im2 = Image.fromarray(colored_map).convert('RGB')
+                #im.save("tmp/original.jpg")
+                im2.save("tmp/heatmap.jpg")
+        break
 if __name__ == "__main__":
     main()
