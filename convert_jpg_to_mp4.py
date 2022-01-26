@@ -46,7 +46,7 @@ def gen_video(imgs, vidfile, fps):
 
 def main():
     imgs = []
-    root = '/home/tmisic/Localizing-Visual-Sounds-the-Hard-Way/'
+    root = '/home/tmisic/audio-visual-tubes/'
     imgs_dir = root + 'imgs/'
     imgs_prefix = ''
     
