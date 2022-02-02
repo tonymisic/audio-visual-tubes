@@ -19,7 +19,7 @@ import soundfile as sf
 from torchvision.transforms.functional import crop
 from torchvideotransforms import video_transforms, volume_transforms
 
-class WholeVideoDataset(Dataset):
+class SubSampledFlickr(Dataset):
     def __init__(self, args, mode='train', transforms=None):
         data = []
         if args.testset == 'flickr':
@@ -81,20 +81,17 @@ class WholeVideoDataset(Dataset):
     
     def _load_video(self, path):
         frames = []
-        try:
-            cap = cv2.VideoCapture(path)
-        except:
-            print("Error in video loading, sent previous video to loader.")
-            return self.previous_video
+        cap = cv2.VideoCapture(path)
         success, image = cap.read()
+        counter = 1 # starts at sampling rate index
         while success:
-            frames.append(image)
+            if counter % self.args.sampling_rate == 0:
+                frames.append(image)
             success, image = cap.read()
+            counter += 1
         cap.release()
         if len(frames) <= 1:
             print("Frame data empty, sent previous video to loader.")
-            return self.previous_video
-        self.previous_video = frames
         return np.asarray(frames)
 
     def __len__(self):
@@ -103,7 +100,7 @@ class WholeVideoDataset(Dataset):
     def __getitem__(self, idx):
         file = self.video_files[idx]
         # Audio
-        samples, samplerate = sf.read(self.audio_path + file[:-3]+'wav')
+        samples, samplerate = sf.read(self.audio_path + file[:-3] +'wav')
         # Video
         frames = self.video_transform(self._load_video(self.video_path + file[:-3] + 'mp4'))
         # repeat if audio is too short
@@ -117,4 +114,3 @@ class WholeVideoDataset(Dataset):
         spectrogram = np.log(spectrogram+ 1e-7)
         spectrogram = self.aid_transform(spectrogram)
         return frames, spectrogram, resamples, samplerate, file
-
