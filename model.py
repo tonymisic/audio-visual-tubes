@@ -62,25 +62,16 @@ class AVENet(nn.Module):
         super(AVENet, self).__init__()
 
         # -----------------------------------------------
-
         self.imgnet = base_models.resnet18(modal='vision', pretrained=True)
         self.audnet = base_models.resnet18(modal='audio')
-        self.avgpool = nn.AdaptiveMaxPool2d((1, 1))
         self.m = nn.Sigmoid()
+        self.avgpool = nn.AdaptiveMaxPool2d((1, 1))
 
-        self.epsilon_temp = args.epsilon
-        self.epsilon_temp2 = args.epsilon2
+        self.epsilon = args.epsilon
+        self.epsilon2 = args.epsilon2
         self.tau = 0.03
         self.trimap = args.tri_map
         self.Neg = args.Neg
-        self.random_threshold = args.random_threshold
-        self.soft_ep = args.soft_ep
-
-        self.vision_fc1 = nn.Conv2d(1024,512 , kernel_size=(1, 1)) 
-        self.relu = nn.ReLU(inplace=True)
-        self.conv3 = nn.Conv2d(1, 1, 1)
-        self.norm3 = nn.BatchNorm2d(1)
-        self.vpool3 = nn.MaxPool2d(14, stride=14)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -90,30 +81,22 @@ class AVENet(nn.Module):
                 nn.init.normal_(m.weight, mean=1, std=0.02)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, image, audio, args, mode='val'):
-
-        self.epsilon =  args.epsilon
-        self.epsilon2 = args.epsilon2
+    def forward(self, image, audio):
         # Image
         B = image.shape[0]
         self.mask = ( 1 -100 * torch.eye(B,B)).cuda()
         img = self.imgnet(image)
-        img = nn.functional.normalize(img, dim=1)
+        img =  nn.functional.normalize(img, dim=1)
 
         # Audio
         aud = self.audnet(audio)
         aud = self.avgpool(aud).view(B,-1)
         aud = nn.functional.normalize(aud, dim=1)
         # Join them
-        out = torch.einsum('nchw,nc->nhw', img, aud).unsqueeze(1)
-        out1 = self.norm3(self.conv3(out))
-        out2 = self.vpool3(out1)
         A = torch.einsum('ncqa,nchw->nqa', [img, aud.unsqueeze(2).unsqueeze(3)]).unsqueeze(1)
         A0 = torch.einsum('ncqa,ckhw->nkqa', [img, aud.T.unsqueeze(2).unsqueeze(3)])
-        A0_ref = self.avgpool(A0).view(B,B) # self.mask
 
-
-
+        # trimap
         Pos = self.m((A - self.epsilon)/self.tau) 
         if self.trimap:    
             Pos2 = self.m((A - self.epsilon2)/self.tau) 
@@ -122,11 +105,11 @@ class AVENet(nn.Module):
             Neg = 1 - Pos
 
         Pos_all =  self.m((A0 - self.epsilon)/self.tau) 
-        A0_f = ((Pos_all * A0).view(*A0.shape[:2],-1).sum(-1) / Pos_all.view(*Pos_all.shape[:2],-1).sum(-1) )* self.mask
-        sim = A0_f 
 
-        #  
+        # positive
         sim1 = (Pos * A).view(*A.shape[:2],-1).sum(-1) / (Pos.view(*Pos.shape[:2],-1).sum(-1))
+        #negative
+        sim = ((Pos_all * A0).view(*A0.shape[:2],-1).sum(-1) / Pos_all.view(*Pos_all.shape[:2],-1).sum(-1) )* self.mask
         sim2 = (Neg * A).view(*A.shape[:2],-1).sum(-1) / Neg.view(*Neg.shape[:2],-1).sum(-1)
 
         if self.Neg:
@@ -134,4 +117,4 @@ class AVENet(nn.Module):
         else:
             logits = torch.cat((sim1,sim),1)/0.07
         
-        return A,logits,Pos,Neg,A0_ref
+        return A,logits,Pos,Neg

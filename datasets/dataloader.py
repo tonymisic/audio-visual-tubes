@@ -21,6 +21,9 @@ from torchvideotransforms import video_transforms, volume_transforms
 
 class SubSampledFlickr(Dataset):
     def __init__(self, args, mode='train', transforms=None):
+        self.args = args
+        self.training_samples = 16
+        self.training_samplerate = 16
         data = []
         if args.testset == 'flickr':
             traincsv = 'metadata/flickr_train.csv'
@@ -83,17 +86,65 @@ class SubSampledFlickr(Dataset):
         frames = []
         cap = cv2.VideoCapture(path)
         success, image = cap.read()
-        counter = 1 # starts at sampling rate index
-        while success:
-            if counter % self.args.sampling_rate == 0:
+        if self.mode == 'train':
+            while success:
+                success, image = cap.read()
                 frames.append(image)
-            success, image = cap.read()
-            counter += 1
-        cap.release()
-        if len(frames) <= 1:
-            print("Frame data empty, sent previous video to loader.")
-        return np.asarray(frames)
+            cap.release()
+            return self.sampleframes(frames)
+            
+        if self.mode == 'test':
+            counter = 1 # starts at sampling rate index
+            while success:
+                if counter % self.args.sampling_rate == 0:
+                    frames.append(image)
+                success, image = cap.read()
+                counter += 1
+            cap.release()
+            return np.asarray(frames)
 
+    def sampleframes(self, frames):
+        indicies = []
+        overlap = (len(frames) - 1) - (self.training_samples * self.training_samplerate)
+        if overlap < 0: # repeat video
+            repeated_frames = frames
+            repeated_frames.extend(frames)
+            middle_index = int(len(repeated_frames) / 2)
+            count = 0
+            for i in range(middle_index - self.training_samplerate, 0, -self.training_samplerate):
+                if count == self.training_samples / 2:
+                    indicies.reverse()
+                    break
+                else:
+                    indicies.append(i)
+                    count += 1
+            count = 0
+            for i in range(middle_index, len(repeated_frames), self.training_samplerate):
+                if count == self.training_samples / 2:
+                    break
+                else:
+                    indicies.append(i)
+                    count += 1
+            return np.asarray(repeated_frames)[indicies]
+        else: # same video
+            middle_index = int(len(frames) / 2)
+            count = 0
+            for i in range(middle_index - self.training_samplerate, 0, -self.training_samplerate):
+                if count == self.training_samples / 2:
+                    indicies.reverse()
+                    break
+                else:
+                    indicies.append(i)
+                    count += 1
+            count = 0
+            for i in range(middle_index, len(frames), self.training_samplerate):
+                if count == self.training_samples / 2:
+                    break
+                else:
+                    indicies.append(i)
+                    count += 1
+            return np.asarray(frames)[indicies]
+    
     def __len__(self):
         return len(self.video_files)  # self.length
 

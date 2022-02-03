@@ -1,4 +1,4 @@
-import os, argparse, random
+import os, argparse, random, glob
 
 def get_arguments():
     parser = argparse.ArgumentParser()
@@ -11,12 +11,18 @@ def main():
     args = get_arguments()
     assert args.subset_size in [5000, 10000, 144000], "Subset invalid"
     files = os.listdir(args.video_path)
+    all_videos = glob.glob('/media/datadrive/flickr/videos/*')
+    all_audio = glob.glob('/media/datadrive/flickr/audio/*.wav')
     indicies = random.sample(range(0, len(files) - 1), args.subset_size)
     selected_files = [files[i] for i in indicies]
-    
-    for file in selected_files:
+    map_audio, map_video = {}, {}
+    for file in all_audio:
+        map_audio[file.split('/')[5].rstrip('.wav')] = 0
+    for file in all_videos:
+        map_video[file.split('/')[5].rstrip('.mp4')] = 0
+    for name in set(map_audio).intersection(set(map_video)): # 8722 samples working right now.
         savefile = open(args.train_file, "a")
-        savefile.write(file.rstrip(".mp4") + ",0\n") # no classes yet, would replace 0 with class number if needed
+        savefile.write(name + ",0\n") # no classes yet, would replace 0 with class number if needed
         savefile.close()
 
 if __name__ == "__main__":
