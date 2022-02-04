@@ -18,7 +18,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import wandb
 
-wandb.init(project="Audio-Visual Tubes",
+wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
     config={
         "Model": "Hard Way",
         "dataset": "flickr10k",
