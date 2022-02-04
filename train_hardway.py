@@ -16,6 +16,8 @@ os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 import warnings
 warnings.filterwarnings('ignore')
+import wandb
+
 def get_arguments():
     parser = argparse.ArgumentParser()
     # from testing code
@@ -24,7 +26,7 @@ def get_arguments():
     parser.add_argument('--image_size',default=224,type=int,help='Height and width of inputs')
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=4, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=256, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -34,7 +36,7 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-4,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=2,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=8,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=50,type=int,help='Number of total epochs to run')
     # novel arguments
     parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
@@ -76,11 +78,11 @@ def main():
         # Train
         running_loss = 0.0
         for step, (frames, spec, audio, samplerate, name) in enumerate(dataloader):
+            print("Step: " + str(step) + "/" + str(len(dataloader)))
             model.train()
             sample_loss = 0.0
             for i in range(frames.size(2)):
                 spec = Variable(spec).cuda()
-                #image = Variable(frames[:,:,i,:,:]).cuda()
                 heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
                 target = torch.zeros(out.shape[0]).cuda().long()     
                 loss = criterion(out, target)
@@ -88,16 +90,15 @@ def main():
                 loss.backward()
                 optim.step()
                 sample_loss += float(loss)
-                break
-            running_loss += sample_loss / 1
-            break
+            running_loss += sample_loss / (i + 1)
         final_loss = running_loss / float(step + 1)
+        print("Epoch " + str(epoch) + " training done.")
         # testing
         with torch.no_grad():
             model.eval()
             ious,aucs = [], []
             for step, (frames, spec, audio, samplerate, name) in enumerate(testdataloader):
-                iou,auc = [], []
+                iou = []
                 for i in range(frames.size(2)):
                     spec = Variable(spec).cuda()
                     heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
@@ -110,7 +111,7 @@ def main():
                     pred[pred>threshold] = 1
                     pred[pred<1] = 0
                     gt_map = testset_gt_frame(args, name[0], (i + 1) * args.sampling_rate)
-                    evaluator = Evaluator()
+                    evaluator = Evaluator() 
                     ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
                     iou.append(ciou)
                 results = []
@@ -131,6 +132,6 @@ def main():
             }, args.summaries_dir + 'model_%s.pth.tar' % (str(epoch)) 
         )
         scheduler.step()
-
+        break
 if __name__ == "__main__":
     main()

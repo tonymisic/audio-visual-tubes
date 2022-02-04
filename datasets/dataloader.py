@@ -11,7 +11,7 @@ from torchvision import transforms, utils
 import pdb
 import time
 from PIL import Image
-import glob
+import glob, time
 import sys 
 import scipy.io.wavfile as wav
 from scipy import signal
@@ -83,33 +83,39 @@ class SubSampledFlickr(Dataset):
         self.aid_transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.0], std=[12.0])])
     
     def _load_video(self, path):
-        frames = []
         cap = cv2.VideoCapture(path)
-        success, image = cap.read()
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        indicies = self.sampleframes(frame_count)
         if self.mode == 'train':
-            while success:
+            frames = []
+            for index in indicies:
+                if index >= frame_count:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, int(index % frame_count))
+                else:  
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, index)
                 success, image = cap.read()
                 frames.append(image)
             cap.release()
-            return self.sampleframes(frames)
-            
+            return np.asarray(frames)
+
         if self.mode == 'test':
             counter = 1 # starts at sampling rate index
+            frames = []
             while success:
                 if counter % self.args.sampling_rate == 0:
+                    success, image = cap.read()
                     frames.append(image)
-                success, image = cap.read()
                 counter += 1
             cap.release()
             return np.asarray(frames)
 
-    def sampleframes(self, frames):
+    def sampleframes(self, length):
         indicies = []
-        overlap = (len(frames) - 1) - (self.training_samples * self.training_samplerate)
+        overlap = length - (self.training_samples * self.training_samplerate)
         if overlap < 0: # repeat video
-            repeated_frames = frames
-            repeated_frames.extend(frames)
-            middle_index = int(len(repeated_frames) / 2)
+            while length + 1 < (self.training_samples * self.training_samplerate):
+                length = length * 2
+                middle_index = int(length / 2)
             count = 0
             for i in range(middle_index - self.training_samplerate, 0, -self.training_samplerate):
                 if count == self.training_samples / 2:
@@ -119,15 +125,15 @@ class SubSampledFlickr(Dataset):
                     indicies.append(i)
                     count += 1
             count = 0
-            for i in range(middle_index, len(repeated_frames), self.training_samplerate):
+            for i in range(middle_index, length, self.training_samplerate):
                 if count == self.training_samples / 2:
                     break
                 else:
                     indicies.append(i)
                     count += 1
-            return np.asarray(repeated_frames)[indicies]
+            return indicies
         else: # same video
-            middle_index = int(len(frames) / 2)
+            middle_index = int(length / 2)
             count = 0
             for i in range(middle_index - self.training_samplerate, 0, -self.training_samplerate):
                 if count == self.training_samples / 2:
@@ -137,13 +143,13 @@ class SubSampledFlickr(Dataset):
                     indicies.append(i)
                     count += 1
             count = 0
-            for i in range(middle_index, len(frames), self.training_samplerate):
+            for i in range(middle_index, length, self.training_samplerate):
                 if count == self.training_samples / 2:
                     break
                 else:
                     indicies.append(i)
                     count += 1
-            return np.asarray(frames)[indicies]
+            return indicies
     
     def __len__(self):
         return len(self.video_files)  # self.length
@@ -153,14 +159,16 @@ class SubSampledFlickr(Dataset):
         # Audio
         samples, samplerate = sf.read(self.audio_path + file[:-3] +'wav')
         # Video
+        start_time = time.time()
         frames = self.video_transform(self._load_video(self.video_path + file[:-3] + 'mp4'))
+        print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))
         # repeat if audio is too short
         if samples.shape[0] < samplerate * 10:
             n = int(samplerate * 10 / samples.shape[0]) + 1
             samples = np.tile(samples, n)
         resamples = samples[:samplerate*10]
         resamples[resamples > 1.] = 1.
-        resamples[resamples < -1.] = -1.
+        resamples[resamples < -1.] = -1
         _, _, spectrogram = signal.spectrogram(resamples,samplerate, nperseg=512, noverlap=1)
         spectrogram = np.log(spectrogram+ 1e-7)
         spectrogram = self.aid_transform(spectrogram)
