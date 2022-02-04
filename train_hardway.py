@@ -18,6 +18,16 @@ import warnings
 warnings.filterwarnings('ignore')
 import wandb
 
+wandb.init(project="Audio-Visual Tubes",
+    config={
+        "Model": "Hard Way",
+        "dataset": "flickr10k",
+        "testset": 9,
+        "epochs": 50,
+        "batch_size": 128
+    }
+)
+
 def get_arguments():
     parser = argparse.ArgumentParser()
     # from testing code
@@ -26,7 +36,7 @@ def get_arguments():
     parser.add_argument('--image_size',default=224,type=int,help='Height and width of inputs')
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=256, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=128, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -40,7 +50,6 @@ def get_arguments():
     parser.add_argument('--epochs',default=50,type=int,help='Number of total epochs to run')
     # novel arguments
     parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
-
     return parser.parse_args() 
 def main():
     # get all arguments
@@ -91,9 +100,12 @@ def main():
                 optim.step()
                 sample_loss += float(loss)
             running_loss += sample_loss / (i + 1)
+            wandb.log({"step": step})
         final_loss = running_loss / float(step + 1)
+        wandb.log({"loss": final_loss})
         print("Epoch " + str(epoch) + " training done.")
-        # testing
+        
+        # Test
         with torch.no_grad():
             model.eval()
             ious,aucs = [], []
@@ -125,13 +137,15 @@ def main():
                 aucs.append(auc_)
             print("Average cIoU ", np.sum(ious) / len(ious))
             print("Average auc ", np.sum(aucs) / len(aucs))
+            wandb.log({ "cIoU": np.sum(ious) / len(ious),
+                        "AUC": np.sum(aucs) / len(aucs)
+            })
         torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optim.state_dict()
-            }, args.summaries_dir + 'model_%s.pth.tar' % (str(epoch)) 
+            }, args.summaries_dir + 'model_ep%s.pth.tar' % (str(epoch)) 
         )
         scheduler.step()
-        break
 if __name__ == "__main__":
     main()

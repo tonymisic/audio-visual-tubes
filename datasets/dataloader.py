@@ -101,13 +101,16 @@ class SubSampledFlickr(Dataset):
         if self.mode == 'test':
             counter = 1 # starts at sampling rate index
             frames = []
+            success = True
             while success:
                 if counter % self.args.sampling_rate == 0:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, counter)
                     success, image = cap.read()
-                    frames.append(image)
+                    if success:
+                        frames.append(image)
                 counter += 1
             cap.release()
-            return np.asarray(frames)
+            return frames
 
     def sampleframes(self, length):
         indicies = []
@@ -159,9 +162,9 @@ class SubSampledFlickr(Dataset):
         # Audio
         samples, samplerate = sf.read(self.audio_path + file[:-3] +'wav')
         # Video
-        start_time = time.time()
+        #start_time = time.time()
         frames = self.video_transform(self._load_video(self.video_path + file[:-3] + 'mp4'))
-        print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))
+        #print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))
         # repeat if audio is too short
         if samples.shape[0] < samplerate * 10:
             n = int(samplerate * 10 / samples.shape[0]) + 1
