@@ -36,7 +36,7 @@ def get_arguments():
     parser.add_argument('--image_size',default=224,type=int,help='Height and width of inputs')
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=128, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=218, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -46,7 +46,7 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-4,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=8,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=2,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=50,type=int,help='Number of total epochs to run')
     # novel arguments
     parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
@@ -138,8 +138,7 @@ def main():
             print("Average cIoU ", np.sum(ious) / len(ious))
             print("Average auc ", np.sum(aucs) / len(aucs))
             wandb.log({ "cIoU": np.sum(ious) / len(ious),
-                        "AUC": np.sum(aucs) / len(aucs)
-            })
+                        "AUC": np.sum(aucs) / len(aucs)})
         torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),

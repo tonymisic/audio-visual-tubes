@@ -19,6 +19,108 @@ import soundfile as sf
 from torchvision.transforms.functional import crop
 from torchvideotransforms import video_transforms, volume_transforms
 
+class GetAudioVideoDataset(Dataset):
+
+    def __init__(self, args, mode='train', transforms=None):
+ 
+        data = []
+        if args.testset == 'flickr':
+            testcsv = 'metadata/flickr_test_hardway.csv'
+            traincsv = 'metadata/flickr_train.csv'
+        elif args.testset == 'vggss':
+            testcsv = 'metadata/vggss_test.csv'
+            traincsv = 'metadata/vggss_train.csv'
+        if mode == 'train':
+            with open(traincsv) as f:
+                csv_reader = csv.reader(f)
+                for item in csv_reader:
+                    data.append(item[0] + '.mp4')
+        elif mode == 'test':
+            with open(testcsv) as f:
+                csv_reader = csv.reader(f)
+                for item in csv_reader:
+                    data.append(item[0] + '.mp4')
+        self.audio_path = args.data_path + 'audio/'
+        self.frame_path = args.data_path + 'frames/'
+        self.imgSize = args.image_size 
+        self.cropSize = 150
+        self.mode = mode
+        self.transforms = transforms
+        # initialize video transform
+        self._init_atransform()
+        self._init_transform()
+        #  Retrieve list of audio and video files
+        self.video_files = []
+   
+        for item in data[:]:
+            self.video_files.append(item )
+        print(len(self.video_files))
+        self.count = 0
+
+    def _init_transform(self):
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+        if self.mode == 'train':
+            self.img_transform = transforms.Compose([
+                transforms.Resize(int(self.imgSize * 1.1), Image.BICUBIC),
+                transforms.RandomCrop(self.imgSize),
+                transforms.RandomHorizontalFlip(),
+                transforms.CenterCrop(self.imgSize),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)])
+        else:
+            self.img_transform = transforms.Compose([
+                transforms.Lambda(self.cropmiddleLeft), #change to currently tested translation
+                transforms.Resize(self.imgSize, Image.BICUBIC),
+                #transforms.CenterCrop(self.imgSize), #uncomment for original cropping
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)])            
+    def croptopLeft(self, image):
+        return crop(image, 0, 0, self.cropSize, self.cropSize)
+
+    def cropbottomRight(self, image):
+        return crop(image, image.size[0] - self.cropSize, image.size[1] - self.cropSize, 
+                    self.cropSize, self.cropSize)
+    def cropmiddleLeft(self, image):
+        return crop(image, int(image.size[0] / 4), 0, 
+                    self.cropSize, self.cropSize)
+
+    def _init_atransform(self):
+        self.aid_transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.0], std=[12.0])])
+#  
+
+    def _load_frame(self, path):
+        img = Image.open(path).convert('RGB')
+        return img
+
+    def __len__(self):
+        # Consider all positive and negative examples
+        return len(self.video_files)  # self.length
+
+    def __getitem__(self, idx):
+        file = self.video_files[idx]
+
+        # Image
+        frame = self.img_transform(self._load_frame(self.frame_path + file[:-3] + 'jpg'))
+        frame_ori = np.array(self._load_frame(self.frame_path  + file[:-3] + 'jpg'))
+        # Audio
+        samples, samplerate = sf.read(self.audio_path + file[:-3]+'wav')
+
+        # repeat if audio is too short
+        if samples.shape[0] < samplerate * 10:
+            n = int(samplerate * 10 / samples.shape[0]) + 1
+            samples = np.tile(samples, n)
+        resamples = samples[:samplerate*10]
+
+        resamples[resamples > 1.] = 1.
+        resamples[resamples < -1.] = -1.
+        frequencies, times, spectrogram = signal.spectrogram(resamples,samplerate, nperseg=512, noverlap=1)
+        spectrogram = np.log(spectrogram+ 1e-7)
+        spectrogram = self.aid_transform(spectrogram)
+ 
+
+        return frame,spectrogram,resamples,file,torch.tensor(frame_ori)
+
 class SubSampledFlickr(Dataset):
     def __init__(self, args, mode='train', transforms=None):
         self.args = args
@@ -85,16 +187,23 @@ class SubSampledFlickr(Dataset):
     def _load_video(self, path):
         cap = cv2.VideoCapture(path)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        indicies = self.sampleframes(frame_count)
+        indicies, failed, findex = self.sampleframes(frame_count), False, []
+        successful_frame = []
         if self.mode == 'train':
             frames = []
             for index in indicies:
-                if index >= frame_count:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, int(index % frame_count))
-                else:  
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, index)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(index % frame_count))
                 success, image = cap.read()
-                frames.append(image)
+                if success:
+                    frames.append(image)
+                    successful_frame = image
+                else:
+                    failed = True
+                    findex.append(index)
+            if failed:
+                for i in findex:
+                    print("Frame "+ str(i) +" failed to load for video: " + str(path) + ", loaded backup frame")
+                    frames.append(successful_frame)
             cap.release()
             return np.asarray(frames)
 
@@ -114,46 +223,27 @@ class SubSampledFlickr(Dataset):
 
     def sampleframes(self, length):
         indicies = []
-        overlap = length - (self.training_samples * self.training_samplerate)
+        overlap = (length - 1) - (self.training_samples * self.training_samplerate)
         if overlap < 0: # repeat video
-            while length + 1 < (self.training_samples * self.training_samplerate):
+            while length - 1 <= (self.training_samples * self.training_samplerate):
                 length = length * 2
                 middle_index = int(length / 2)
-            count = 0
-            for i in range(middle_index - self.training_samplerate, 0, -self.training_samplerate):
-                if count == self.training_samples / 2:
-                    indicies.reverse()
-                    break
-                else:
-                    indicies.append(i)
-                    count += 1
-            count = 0
-            for i in range(middle_index, length, self.training_samplerate):
-                if count == self.training_samples / 2:
-                    break
-                else:
-                    indicies.append(i)
-                    count += 1
-            return indicies
+            a = list(range(middle_index - self.training_samplerate, -1, -self.training_samplerate))[0:int(self.training_samples/2)]
+            b = list(range(middle_index, length, self.training_samplerate))[0:int(self.training_samples/2)]
+            a.reverse()
+            a.extend(b)
+            if len(a) < 16: # indexing error, will stop dataloader in its tracks
+                print("Array: " + str(a) + " Length: " + str(len(a)) + " Middle index: " + middle_index)
+            return a
         else: # same video
             middle_index = int(length / 2)
-            count = 0
-            for i in range(middle_index - self.training_samplerate, 0, -self.training_samplerate):
-                if count == self.training_samples / 2:
-                    indicies.reverse()
-                    break
-                else:
-                    indicies.append(i)
-                    count += 1
-            count = 0
-            for i in range(middle_index, length, self.training_samplerate):
-                if count == self.training_samples / 2:
-                    break
-                else:
-                    indicies.append(i)
-                    count += 1
-            return indicies
-    
+            a = list(range(middle_index - self.training_samplerate, -1, -self.training_samplerate))[0:int(self.training_samples/2)]
+            b = list(range(middle_index, length, self.training_samplerate))[0:int(self.training_samples/2)]
+            a.reverse()
+            a.extend(b)
+            if len(a) < 16: # indexing error, will stop dataloader in its tracks
+                print("Array: " + str(a) + " Length: " + str(len(a)) + " Middle index: " + middle_index)
+            return a
     def __len__(self):
         return len(self.video_files)  # self.length
 
