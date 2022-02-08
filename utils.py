@@ -51,7 +51,7 @@ def normalize_img(value, vmax=None, vmin=None):
 def testset_gt(args,name):
 
     if args.testset == 'flickr':
-        gt = ET.parse(args.gt_path + '%s.xml' % name[:-4]).getroot()
+        gt = ET.parse(args.og_gt_path + '%s.xml' % name[:-4]).getroot()
         gt_map = np.zeros([224,224])
         bboxs = []
         for child in gt: 
