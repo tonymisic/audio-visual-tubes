@@ -27,8 +27,8 @@ class GetAudioVideoDataset(Dataset):
                 csv_reader = csv.reader(f)
                 for item in csv_reader:
                     data.append(item[0] + '.mp4')
-        self.audio_path = args.data_path + 'audio/'
-        self.frame_path = args.data_path + 'frames/'
+        self.audio_path = args.og_data_path + 'audio/'
+        self.frame_path = args.og_data_path + 'frames/'
         self.imgSize = args.image_size 
         self.cropSize = 150
         self.mode = mode
@@ -57,7 +57,6 @@ class GetAudioVideoDataset(Dataset):
                 transforms.Normalize(mean, std)])
         else:
             self.img_transform = transforms.Compose([
-                #transforms.Lambda(self.cropmiddleLeft),
                 transforms.Resize(self.imgSize, Image.BICUBIC),
                 transforms.CenterCrop(self.imgSize),
                 transforms.ToTensor(),
@@ -251,7 +250,7 @@ class PerFrameLabels(Dataset):
     def __init__(self, args, mode='train', transforms=None):
         data = []
         if args.testset == 'flickr':
-            testcsv = '/home/tmisic/Localizing-Visual-Sounds-the-Hard-Way/metadata/flickr_quantitative_examples.csv'
+            testcsv = 'metadata/flickr_test.csv'
         elif args.testset == 'vggss':
             testcsv = 'metadata/vggss_test.csv'
 

@@ -1,4 +1,4 @@
-python train_hardway.py \
+python visualize.py \
 --testset "flickr" \
 --data_path "/media/datadrive/flickr/" \
 --gt_path  "/media/datadrive/flickr/Annotations/" \
