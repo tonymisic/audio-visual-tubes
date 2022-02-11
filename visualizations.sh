@@ -4,4 +4,4 @@ python visualize.py \
 --gt_path  "/media/datadrive/flickr/Annotations/" \
 --og_data_path "/media/datadrive/flickr/FLICKR_5k/" \
 --og_gt_path "/media/datadrive/flickr/FLICKR_5k/Annotations/" \
---summaries_dir "checkpoints/"
+--summaries_dir "pretrained/lvs_soundnet.pth.tar"

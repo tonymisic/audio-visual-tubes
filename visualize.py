@@ -62,7 +62,7 @@ def main():
     model = nn.DataParallel(model)
     model.to(device)
     # load pretrained model if it exists
-    if os.path.exists(args.summaries_dir) and False:
+    if os.path.exists(args.summaries_dir):
         print('load pretrained')
         checkpoint = torch.load(args.summaries_dir)
         model_dict = model.state_dict()
@@ -73,10 +73,10 @@ def main():
     # init datasets
     #dataset = SubSampledFlickr(args,  mode='train')
     testdataset = PerFrameLabels(args, mode='test')
-    #original_testset = GetAudioVideoDataset(args, mode='test')
+    original_testset = GetAudioVideoDataset(args, mode='test')
     #dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.n_threads)
     testdataloader = DataLoader(testdataset, batch_size=1, shuffle=False, num_workers=args.n_threads)
-    #originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
+    originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
     print("Loaded dataloader and loss function.")
@@ -85,34 +85,77 @@ def main():
     print("Optimizer loaded.")
     scheduler = lr_scheduler.MultiStepLR(optim, milestones=[50,100,150,180], gamma=0.1)
 
+    overfit, loaded, original = False, True, False
     # epoch
     for epoch in range(args.epochs):
-        for step, (frames, spec, _, _, name) in enumerate(testdataloader):
-            print("Training Step: " + str(step) + "/" + str(len(testdataloader)))
-            model.train()
-            for count, i in enumerate(range(args.sampling_rate * 5, frames.size(2), args.sampling_rate)):
-                spec = Variable(spec).cuda()
-                heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
-                target = torch.zeros(out.shape[0]).cuda().long() 
-                loss = criterion(out, target)
-                optim.zero_grad()
-                loss.backward()
-                optim.step()
-                heatmap_arr =  heatmap.data.cpu().numpy()
-                heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
-                heatmap_now = normalize_img(-heatmap_now)
-                pred = 1 - heatmap_now
-                threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
-                pred[pred>threshold] = 1
-                pred[pred<1] = 0
-                gt_map = testset_gt_frame(args, name[0], i)
-                evaluator = Evaluator() 
-                ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
-                print("Video: " + name[0] + " Frame: " + str(i) + " cIoU: " + str(ciou) + " loss: " + str(float(loss)))
-                save_image(frames[:,:,i,:,:].float(), epoch, pred, gt_map)
-                #pause()
+        if overfit:
+            for step, (frames, spec, _, _, name) in enumerate(testdataloader):
+                print("Training Step: " + str(step) + "/" + str(len(testdataloader)))
+                model.train()
+                for count, i in enumerate(range(args.sampling_rate * 5, frames.size(2), args.sampling_rate)):
+                    spec = Variable(spec).cuda()
+                    heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
+                    target = torch.zeros(out.shape[0]).cuda().long() 
+                    loss = criterion(out, target)
+                    optim.zero_grad()
+                    loss.backward()
+                    optim.step()
+                    heatmap_arr =  heatmap.data.cpu().numpy()
+                    heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                    heatmap_now = normalize_img(-heatmap_now)
+                    pred = 1 - heatmap_now
+                    threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                    pred[pred>threshold] = 1
+                    pred[pred<1] = 0
+                    gt_map = testset_gt_frame(args, name[0], i)
+                    evaluator = Evaluator() 
+                    ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
+                    print("Video: " + name[0] + " Frame: " + str(i) + " cIoU: " + str(ciou) + " loss: " + str(float(loss)))
+                    save_image(frames[:,:,i,:,:].float(), epoch, pred, gt_map)
+                    #pause()
+                    break
                 break
-            break
-        scheduler.step()
+            scheduler.step()
+        if loaded:
+            for step, (frames, spec, _, _, name) in enumerate(testdataloader):
+                #print("Training Step: " + str(step) + "/" + str(len(testdataloader)))
+                model.eval()
+                for count, i in enumerate(range(args.sampling_rate, frames.size(2), args.sampling_rate)):
+                    spec = Variable(spec).cuda()
+                    heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
+                    heatmap_arr =  heatmap.data.cpu().numpy()
+                    heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                    heatmap_now = normalize_img(-heatmap_now)
+                    pred = 1 - heatmap_now
+                    threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                    pred[pred>threshold] = 1
+                    pred[pred<1] = 0
+                    gt_map = testset_gt_frame(args, name[0], i)
+                    evaluator = Evaluator() 
+                    ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
+                    print("Video: " + name[0] + " Frame: " + str(i) + " cIoU: " + str(ciou))
+                    save_image(frames[:,:,i,:,:].float(), count, pred, gt_map)
+                    pause()
+                break
+        if original:
+            for step, (image, spec, audio, name, im) in enumerate(originaldataloader):
+                print('%d / %d' % (step,len(originaldataloader) - 1))
+                spec = Variable(spec).cuda()
+                image = Variable(image).cuda()
+                heatmap,_,Pos,Neg = model(image.float(),spec.float())
+                heatmap_arr =  heatmap.data.cpu().numpy()
+                for i in range(spec.shape[0]):
+                    heatmap_now = cv2.resize(heatmap_arr[i,0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                    heatmap_now = normalize_img(-heatmap_now)
+                    gt_map = testset_gt(args, name[i])
+                    pred = 1 - heatmap_now
+                    threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                    pred[pred>threshold] = 1
+                    pred[pred<1] = 0
+                    evaluator = Evaluator()
+                    ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
+                    print("Video: " + name[0] + " Frame: Middle cIoU: " + str(ciou))
+                    save_image(image.float(), i, pred, gt_map)
+                    pause()
 if __name__ == "__main__":
     main()
