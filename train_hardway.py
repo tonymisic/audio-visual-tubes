@@ -14,11 +14,11 @@ import cv2
 from sklearn.metrics import auc
 from PIL import Image
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="6,7"
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train, test, val, record, save = False, True, True, False, False 
+train, test, val, record, save = True, True, True, True, True 
 
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
@@ -26,8 +26,9 @@ if record:
             "Model": "Hard Way",
             "dataset": "flickr10k",
             "testset": 9,
+            "lr": 1e-6,
             "epochs": 200,
-            "batch_size": 128
+            "batch_size": 16
         }
     )
 
@@ -49,10 +50,10 @@ def get_arguments():
     parser.add_argument('--Neg',action='store_true')
     parser.set_defaults(Neg=True)
     # from training code
-    parser.add_argument('--learning_rate',default=1e-4,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
+    parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
     parser.add_argument('--n_threads',default=4,type=int,help='Number of threads for multi-thread loading')
-    parser.add_argument('--epochs',default=1,type=int,help='Number of total epochs to run')
+    parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     # novel arguments
     parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
     return parser.parse_args() 
@@ -67,7 +68,7 @@ def main():
     model = nn.DataParallel(model)
     model.to(device)
     # load pretrained model if it exists, off for now
-    if os.path.exists(args.summaries_dir):
+    if os.path.exists(args.summaries_dir) and False:
         print('load pretrained')
         checkpoint = torch.load(args.summaries_dir)
         model_dict = model.state_dict()
@@ -95,8 +96,8 @@ def main():
         # Train
         if train:
             running_loss = 0.0
-            for step, (frames, spec, audio, samplerate, name) in enumerate(dataloader):
-                #print("Training Step: " + str(step) + "/" + str(len(dataloader)))
+            for step, (frames, spec, _, _, name) in enumerate(dataloader):
+                print("Training Step: " + str(step) + "/" + str(len(dataloader)))
                 model.train()
                 sample_loss = 0.0
                 for count, i in enumerate(range(frames.size(2))):
@@ -112,18 +113,18 @@ def main():
                 if record:
                     wandb.log({"step": step})
             final_loss = running_loss / float(step + 1)
-            if record:
-                wandb.log({"loss": final_loss})
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
+            if record:
+                wandb.log({ "loss": final_loss
+                })
         
         if test:
             with torch.no_grad():
                 model.eval()
-                # My Testset
                 ious,aucs = [], []
-                for step, (frames, spec, audio, samplerate, name) in enumerate(testdataloader):
-                    #print("Testing Step: " + str(step) + "/" + str(len(testdataloader)))
+                for step, (frames, spec, _, _, name) in enumerate(testdataloader):
+                    print("Testing Step: " + str(step) + "/" + str(len(testdataloader)))
                     iou = []
                     for i in range(args.sampling_rate, frames.size(2), args.sampling_rate):
                         spec = Variable(spec).cuda()
@@ -158,11 +159,11 @@ def main():
             with torch.no_grad():
                 model.eval()
                 iou = []
-                for step, (image, spec, audio, name, im) in enumerate(originaldataloader):
-                    #print('%d / %d' % (step,len(originaldataloader) - 1))
+                for step, (image, spec, _, name, _) in enumerate(originaldataloader):
+                    print('%d / %d' % (step,len(originaldataloader) - 1))
                     spec = Variable(spec).cuda()
                     image = Variable(image).cuda()
-                    heatmap,_,Pos,Neg = model(image.float(),spec.float())
+                    heatmap,_,_,_ = model(image.float(),spec.float())
                     heatmap_arr =  heatmap.data.cpu().numpy()
                     for i in range(spec.shape[0]):
                         heatmap_now = cv2.resize(heatmap_arr[i,0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
@@ -194,6 +195,5 @@ def main():
                     'optimizer_state_dict': optim.state_dict()
                 }, args.summaries_dir + 'model_ep%s.pth.tar' % (str(epoch)) 
             )
-        
 if __name__ == "__main__":
     main()

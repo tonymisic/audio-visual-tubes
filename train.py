@@ -7,104 +7,183 @@ from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 from utils import *
 import numpy as np
-import json
 import argparse, torch.optim as optim 
 from model import FullModel
-from datasets import WholeVideoDataset
+from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
+from losses import TC_Hardway
 import cv2
 from sklearn.metrics import auc
-from losses import HardWayLoss
 from PIL import Image
-import convert_jpg_to_mp4, subprocess
-os.environ["CUDA_VISIBLE_DEVICES"]="5,6,7"
-
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
+import warnings
+warnings.filterwarnings('ignore')
+import wandb
+train, test, val, record, save = True, True, True, False, True
+if record:
+    wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
+        config={
+            "Model": "My model",
+            "dataset": "flickr10k",
+            "testset": 9,
+            "lr": 1e-6,
+            "epochs": 200,
+            "batch_size": 16
+        }
+    )
 def get_arguments():
     parser = argparse.ArgumentParser()
+    # from testing code
     parser.add_argument('--testset',default='flickr',type=str,help='testset,(flickr or vggss)') 
     parser.add_argument('--data_path', default='',type=str,help='Root directory path of data')
+    parser.add_argument('--og_data_path', default='',type=str,help='Root directory path of data')
     parser.add_argument('--image_size',default=224,type=int,help='Height and width of inputs')
     parser.add_argument('--gt_path',default='',type=str)
+    parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=1, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=8, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
     parser.set_defaults(tri_map=True)
     parser.add_argument('--Neg',action='store_true')
     parser.set_defaults(Neg=True)
-    return parser.parse_args() 
+    # from training code
+    parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
+    parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
+    parser.add_argument('--n_threads',default=0,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
+    # novel arguments
+    parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
+    return parser.parse_args()
 
 def main():
+    # get all arguments
     args = get_arguments()
-
-    # load model
+    #  gpu and model init
     model = FullModel(args)
-    #model.vidnet.load_state_dict(torch.load('pretrained/r3d18_KM_200ep.pth')['state_dict'])
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = nn.DataParallel(model).cuda()
+    model.vidnet.load_state_dict(torch.load('pretrained/r3d18_KM_200ep.pth')['state_dict'])
+    device = torch.device("cuda")
+    model.cuda()
+    model = nn.DataParallel(model) 
     model.to(device)
-    criterion = nn.CrossEntropyLoss()
-    criterion.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.0001) # from paper
+    print('load pretrained')
 
-    # dataloader
-    trainset = WholeVideoDataset(args, mode='test')
-    traindataloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, num_workers = 1)
-    print("Loaded dataloader.")
-    
-    # gt for vggss
-    if args.testset == 'vggss':
-        args.gt_all = {}
-        with open('metadata/vggss.json') as json_file:
-            annotations = json.load(json_file)
-        for annotation in annotations:
-            args.gt_all[annotation['file']] = annotation['bbox']
-
-    iou = []
-    ious, aucs = [], []
-    running_loss = 0.0
-    qualitative, quantitative = True, False
-    for step, (frames, spec, audio, samplerate, name) in enumerate(traindataloader):
-        subprocess.call("mkdir imgs/" + name[0].strip('.mp4'), cwd=os.getcwd(), shell=True)
-        print('%d / %d' % (step, len(traindataloader) - 1))
-        spec = Variable(spec).cuda()
-        attention_map = model(spec.float(), frames).unsqueeze(1)
-        upsample = torch.nn.Upsample(size=(frames.size(2), 7, 7), mode='trilinear')
-        attention_map = upsample(attention_map).squeeze(1)
-        for sample in range(attention_map.size(0)):
-            for frame in range(attention_map.size(1)):
-                heatmap_now = cv2.resize(attention_map[sample,frame].cpu().detach().numpy(), dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
-                heatmap_now = normalize_img(heatmap_now)
-                image_now = normalize_img(frames[sample, :, frame])
-                pred = 1 - heatmap_now
-                threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
-                pred[pred>threshold]  = 1
-                pred[pred<1] = 0
-                if qualitative:
-                    colored_map = cv2.applyColorMap(np.uint8(pred * 255), cv2.COLORMAP_JET)
-                    im2 = Image.fromarray(np.uint8(np.add((image_now.cpu().numpy() * 255).transpose((1,2,0)) * 0.5, colored_map * 0.5))).convert('RGB')
-                    im2.save("imgs/" + name[0].strip('.mp4') + "/pred_heatmap" + str(frame) + ".jpg")
-                if quantitative:
-                    if (frame % 20 == 0 and frame != 0): # labeled frames to calculate cIoU
-                        gt_map = testset_gt_frame(args, name[0], frame)
+    # init datasets
+    dataset = SubSampledFlickr(args,  mode='train')
+    testdataset = PerFrameLabels(args, mode='test')
+    original_testset = GetAudioVideoDataset(args, mode='test')
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.n_threads)
+    testdataloader = DataLoader(testdataset, batch_size=1, shuffle=False, num_workers=args.n_threads)
+    originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
+    # loss
+    criterion = TC_Hardway()
+    print("Loaded dataloader and loss function.")
+    # optimiser
+    optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    print("Optimizer loaded.")
+    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[50,100,150,180], gamma=0.1)
+    if record:
+        wandb.watch(model, optim, log="all", log_freq=1000)
+    for epoch in range(args.epochs):
+        # Train
+        if train:
+            running_loss = 0.0
+            for step, (frames, spec, _, _, name) in enumerate(dataloader):
+                print("Training Step: " + str(step) + "/" + str(len(dataloader)))
+                model.train()
+                spec = Variable(spec).cuda()
+                frames = Variable(frames).cuda()
+                attention = model(spec.float(), frames.float())
+                #target = torch.zeros(out.shape[0]).cuda().long()     
+                #loss = criterion(out, target)
+                optim.zero_grad()
+                #loss.backward()
+                optim.step()
+                #running_loss += float(loss)
+                if record:
+                    wandb.log({"step": step})
+            final_loss = running_loss / float(step + 1)
+            print("Epoch " + str(epoch) + " training done.")
+            scheduler.step()
+            if record:
+                wandb.log({ "loss": final_loss})
+        
+        if test:
+            with torch.no_grad():
+                model.eval()
+                ious,aucs = [], []
+                for step, (frames, spec, _, _, name) in enumerate(testdataloader):
+                    print("Testing Step: " + str(step) + "/" + str(len(testdataloader)))
+                    iou = []
+                    for i in range(args.sampling_rate, frames.size(2), args.sampling_rate):
+                        spec = Variable(spec).cuda()
+                        heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
+                        target = torch.zeros(out.shape[0]).cuda().long() 
+                        heatmap_arr =  heatmap.data.cpu().numpy()
+                        heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                        heatmap_now = normalize_img(-heatmap_now)
+                        pred = 1 - heatmap_now
+                        threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                        pred[pred>threshold] = 1
+                        pred[pred<1] = 0
+                        gt_map = testset_gt_frame(args, name[0], i)
+                        evaluator = Evaluator() 
+                        ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
+                        iou.append(ciou)
+                    results = []
+                    for i in range(21):
+                        result = np.sum(np.array(iou) >= 0.05 * i)
+                        result = result / len(iou)
+                        results.append(result)
+                    x = [0.05 * i for i in range(21)]
+                    auc_ = auc(x, results)
+                    ious.append(np.sum(np.array(iou) >= 0.5) / len(iou))
+                    aucs.append(auc_)
+                print("Whole Video cIoU ", np.sum(ious) / len(ious))
+                print("Whole Video auc ", np.sum(aucs) / len(aucs))
+                if record:
+                    wandb.log({ "Whole Video cIoU": np.sum(ious) / len(ious),
+                                "Whole Video AUC": np.sum(aucs) / len(aucs)})
+        if val:
+            with torch.no_grad():
+                model.eval()
+                iou = []
+                for step, (image, spec, _, name, _) in enumerate(originaldataloader):
+                    print('%d / %d' % (step,len(originaldataloader) - 1))
+                    spec = Variable(spec).cuda()
+                    image = Variable(image).cuda()
+                    heatmap,_,_,_ = model(image.float(),spec.float())
+                    heatmap_arr =  heatmap.data.cpu().numpy()
+                    for i in range(spec.shape[0]):
+                        heatmap_now = cv2.resize(heatmap_arr[i,0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                        heatmap_now = normalize_img(-heatmap_now)
+                        gt_map = testset_gt(args, name[i])
+                        pred = 1 - heatmap_now
+                        threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                        pred[pred>threshold] = 1
+                        pred[pred<1] = 0
                         evaluator = Evaluator()
                         ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
                         iou.append(ciou)
-        convert_jpg_to_mp4.main()
-        subprocess.call(str("rm -rf imgs/" + name[0].strip('.mp4') + "/*"), cwd=os.getcwd(), shell=True)
-        break
-        results = []
-        for i in range(21):
-            result = np.sum(np.array(iou) >= 0.05 * i)
-            result = result / len(iou)
-            results.append(result)
-        x = [0.05 * i for i in range(21)]
-        auc_ = auc(x, results)
-        print('cIoU' , np.sum(np.array(iou) >= 0.5) / len(iou))
-        print('auc',auc_)
-        ious.append(np.sum(np.array(iou) >= 0.5) / len(iou))
-        aucs.append(auc_)
-    print("Average cIoU ", np.sum(ious) / len(ious))
-    print("Average auc ", np.sum(aucs) / len(aucs))
+                results = []
+                for i in range(21):
+                    result = np.sum(np.array(iou) >= 0.05 * i)
+                    result = result / len(iou)
+                    results.append(result)
+                x = [0.05 * i for i in range(21)]
+                auc_ = auc(x, results)
+                print("Hardway Test cIoU ", np.sum(np.array(iou) >= 0.5)/len(iou))
+                print("Hardway Test auc ", auc_)
+                if record:
+                    wandb.log({ "Hardway Test cIoU": np.sum(np.array(iou) >= 0.5)/len(iou),
+                                "Hardway Test AUC": auc_})
+        if save:
+            torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optim.state_dict()
+                }, args.summaries_dir + 'model_ep%s.pth.tar' % (str(epoch)) 
+            )
 if __name__ == "__main__":
     main()

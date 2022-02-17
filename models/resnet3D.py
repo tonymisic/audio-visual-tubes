@@ -135,17 +135,17 @@ class ResNet(nn.Module):
                                        block_inplanes[1],
                                        layers[1],
                                        shortcut_type,
-                                       stride=2)
+                                       stride=(1,2,2)) # no temporal pooling
         self.layer3 = self._make_layer(block,
                                        block_inplanes[2],
                                        layers[2],
                                        shortcut_type,
-                                       stride=2)
+                                       stride=(1,2,2)) # no temporal pooling
         self.layer4 = self._make_layer(block,
                                        block_inplanes[3],
                                        layers[3],
                                        shortcut_type,
-                                       stride=2)
+                                       stride=(1,2,2)) # no temporal pooling
 
         self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
         self.fc = nn.Linear(block_inplanes[3] * block.expansion, n_classes)
@@ -205,7 +205,6 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-
         x = self.avgpool(x)
 
         x = x.view(x.size(0), -1)

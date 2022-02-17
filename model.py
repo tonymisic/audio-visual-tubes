@@ -6,7 +6,7 @@ from models import resnet3D
 #
 # MY MODEL
 #
-activation, selected_layer = {}, 'layer3'
+activation, selected_layer = {}, 'layer4'
 def get_activation(name):
     def hook(model, input, output):
         activation[name] = output.detach()
@@ -15,7 +15,7 @@ def get_activation(name):
 class FullModel(nn.Module):
     def __init__(self, args):
         super(FullModel, self).__init__()
-        self.vidnet = resnet3D.generate_model(model_depth=18, no_max_pool=False, n_classes=1039)
+        self.vidnet = resnet3D.generate_model(model_depth=18, no_max_pool=True, n_classes=1039)
         self.audnet = base_models.resnet18(modal='audio')
         self.avgpool = nn.AdaptiveMaxPool2d((1, 1))
         self.vidnet.layer4.register_forward_hook(get_activation(selected_layer))
@@ -26,10 +26,10 @@ class FullModel(nn.Module):
         B = audio.shape[0]
         aud = self.audnet(audio)
         aud = self.avgpool(aud).view(B,-1)
-        aud = nn.functional.normalize(aud, dim=1) # batch_size, 512
+        aud = nn.functional.normalize(aud, dim=1)
         # video editing
         _ = self.vidnet(video)
-        vid = activation[selected_layer]  # batch_size, 512, 88, 7, 7 
+        vid = activation[selected_layer]
         attn_output = self.attention(aud, vid.permute([0, 2, 3, 4, 1]))
         return attn_output
 
