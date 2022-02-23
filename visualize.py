@@ -118,7 +118,6 @@ def main():
             scheduler.step()
         if loaded:
             for step, (frames, spec, _, _, name) in enumerate(testdataloader):
-                #print("Training Step: " + str(step) + "/" + str(len(testdataloader)))
                 model.eval()
                 for count, i in enumerate(range(args.sampling_rate, frames.size(2), args.sampling_rate)):
                     spec = Variable(spec).cuda()

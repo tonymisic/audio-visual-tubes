@@ -19,7 +19,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train, test, val, record, save = True, True, True, False, True
+train, test, val, record, save = False, True, True, False, False
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
@@ -94,13 +94,12 @@ def main():
                 model.train()
                 spec = Variable(spec).cuda()
                 frames = Variable(frames).cuda()
-                attention = model(spec.float(), frames.float())
-                #target = torch.zeros(out.shape[0]).cuda().long()     
-                #loss = criterion(out, target)
+                attention = model(spec.float(), frames.float()) 
+                loss = criterion(attention, device)
                 optim.zero_grad()
-                #loss.backward()
+                loss.backward()
                 optim.step()
-                #running_loss += float(loss)
+                running_loss += float(loss)
                 if record:
                     wandb.log({"step": step})
             final_loss = running_loss / float(step + 1)
