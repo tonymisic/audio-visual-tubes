@@ -6,6 +6,7 @@ datasets/FLICKR/
 datasets/VGGSS/
 datasets/Dataset.tar.gz
 metadata/urls_public.txt
+metadata/filesnotfound.txt
 pretrained/
 checkpoints/
 imgs/
