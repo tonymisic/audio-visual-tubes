@@ -18,7 +18,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train, test, val, record, save = True, True, True, True, True 
+train, test, test_hardway, val, record, save = True, True, True, True, True
 
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
@@ -58,6 +58,12 @@ def get_arguments():
     parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
     return parser.parse_args() 
 
+def save_image(image, index, pred=None, gt_map=None):
+    image = normalize_img(image)
+    temp = cv2.applyColorMap(np.uint8(gt_map * 128), cv2.COLORMAP_JET)
+    temp2 = cv2.applyColorMap(np.uint8(pred * 255), cv2.COLORMAP_JET)
+    Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.4, np.add(temp * 0.5, temp2 * 0.5) * 0.6))).convert('RGB').save("tmp/pred_heatmap" + str(index) + ".jpg")
+
 def main():
     # get all arguments
     args = get_arguments()
@@ -79,9 +85,11 @@ def main():
     # init datasets
     dataset = SubSampledFlickr(args,  mode='train')
     testdataset = PerFrameLabels(args, mode='test')
+    valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.n_threads)
     testdataloader = DataLoader(testdataset, batch_size=1, shuffle=False, num_workers=args.n_threads)
+    valdataloader = DataLoader(valdataset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
@@ -150,12 +158,12 @@ def main():
                     auc_ = auc(x, results)
                     ious.append(np.sum(np.array(iou) >= 0.5) / len(iou))
                     aucs.append(auc_)
-                print("Whole Video cIoU ", np.sum(ious) / len(ious))
-                print("Whole Video auc ", np.sum(aucs) / len(aucs))
+                print("Testing cIoU ", np.sum(ious) / len(ious))
+                print("Testing auc ", np.sum(aucs) / len(aucs))
                 if record:
-                    wandb.log({ "Whole Video cIoU": np.sum(ious) / len(ious),
-                                "Whole Video AUC": np.sum(aucs) / len(aucs)})
-        if val:
+                    wandb.log({ "Testing cIoU": np.sum(ious) / len(ious),
+                                "Testing AUC": np.sum(aucs) / len(aucs)})
+        if test_hardway:
             with torch.no_grad():
                 model.eval()
                 iou = []
@@ -188,6 +196,43 @@ def main():
                 if record:
                     wandb.log({ "Hardway Test cIoU": np.sum(np.array(iou) >= 0.5)/len(iou),
                                 "Hardway Test AUC": auc_})
+        if val:
+            with torch.no_grad():
+                model.eval()
+                ious,aucs = [], []
+                for step, (frames, spec, _, _, name) in enumerate(valdataloader):
+                    print("Testing Step: " + str(step) + "/" + str(len(valdataloader)))
+                    iou = []
+                    for i in range(args.sampling_rate, frames.size(2), args.sampling_rate):
+                        spec = Variable(spec).cuda()
+                        heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
+                        target = torch.zeros(out.shape[0]).cuda().long() 
+                        heatmap_arr =  heatmap.data.cpu().numpy()
+                        heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                        heatmap_now = normalize_img(-heatmap_now)
+                        pred = 1 - heatmap_now
+                        threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                        pred[pred>threshold] = 1
+                        pred[pred<1] = 0
+                        gt_map = testset_gt_frame(args, name[0], i)
+                        evaluator = Evaluator() 
+                        ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
+                        iou.append(ciou)
+                    results = []
+                    for i in range(21):
+                        result = np.sum(np.array(iou) >= 0.05 * i)
+                        result = result / len(iou)
+                        results.append(result)
+                    x = [0.05 * i for i in range(21)]
+                    auc_ = auc(x, results)
+                    ious.append(np.sum(np.array(iou) >= 0.5) / len(iou))
+                    aucs.append(auc_)
+                print("Validation cIoU ", np.sum(ious) / len(ious))
+                print("Validation auc ", np.sum(aucs) / len(aucs))
+                if record:
+                    wandb.log({ "Validation cIoU": np.sum(ious) / len(ious),
+                                "Validation AUC": np.sum(aucs) / len(aucs)})
+        
         if save:
             torch.save({
                     'epoch': epoch,

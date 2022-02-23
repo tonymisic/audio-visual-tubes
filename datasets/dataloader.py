@@ -247,10 +247,13 @@ class SubSampledFlickr(Dataset):
         return frames, spectrogram, resamples, samplerate, file
 
 class PerFrameLabels(Dataset):
-    def __init__(self, args, mode='train', transforms=None):
+    def __init__(self, args, mode='test', transforms=None):
         data = []
         if args.testset == 'flickr':
-            testcsv = 'metadata/flickr_test.csv'
+            if mode == 'val':
+                testcsv = 'metadata/flickr_val.csv'
+            else:
+                testcsv = 'metadata/flickr_test.csv'
         elif args.testset == 'vggss':
             testcsv = 'metadata/vggss_test.csv'
 
