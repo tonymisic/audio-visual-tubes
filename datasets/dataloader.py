@@ -102,8 +102,15 @@ class GetAudioVideoDataset(Dataset):
 class SubSampledFlickr(Dataset):
     def __init__(self, args, mode='train', transforms=None):
         self.args = args
-        self.training_samples = 16
-        self.training_samplerate = 16
+        self.middle_sample = False
+        self.backup_singleframe = None
+        if args.frame_density < 2:
+            self.middle_sample = True
+            self.training_samples = args.frame_density
+            self.training_samplerate = args.frame_density
+        else:
+            self.training_samples = args.frame_density
+            self.training_samplerate = args.frame_density
         data = []
         if args.testset == 'flickr':
             traincsv = 'metadata/flickr_train.csv'
@@ -158,7 +165,20 @@ class SubSampledFlickr(Dataset):
                 volume_transforms.ClipToTensor(),
                 video_transforms.Normalize(mean, std)
             ])
-
+        if self.mode == 'train':
+            self.img_transform = transforms.Compose([
+                transforms.Resize(int(self.imgSize * 1.1), Image.BICUBIC),
+                transforms.RandomCrop(self.imgSize),
+                transforms.RandomHorizontalFlip(),
+                transforms.CenterCrop(self.imgSize),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)])
+        else:
+            self.img_transform = transforms.Compose([
+                transforms.Resize(self.imgSize, Image.BICUBIC),
+                transforms.CenterCrop(self.imgSize),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std)])   
     def _init_atransform(self):
         self.aid_transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.0], std=[12.0])])
     
@@ -199,6 +219,23 @@ class SubSampledFlickr(Dataset):
                 counter += 1
             cap.release()
             return frames
+    def _load_middleframe(self, path):
+        cap = cv2.VideoCapture(path)
+        frame_middle = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) / 2)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_middle)
+        success, image = cap.read()
+        if success:
+            self.backup_singleframe = image
+            return Image.fromarray(np.asarray(image)).convert('RGB')
+        else:
+            frame_middle += 1
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_middle)
+            success, image = cap.read()
+            if success:
+                self.backup_singleframe = image
+                return Image.fromarray(np.asarray(image)).convert('RGB')
+            else:
+                return Image.fromarray(np.asarray(self.backup_singleframe)).convert('RGB')
 
     def sampleframes(self, length):
         indicies = []
@@ -232,7 +269,10 @@ class SubSampledFlickr(Dataset):
         samples, samplerate = sf.read(self.audio_path + file[:-3] +'wav')
         # Video
         #start_time = time.time()
-        frames = self.video_transform(self._load_video(self.video_path + file[:-3] + 'mp4'))
+        if self.middle_sample:
+            frames = self.img_transform(self._load_middleframe(self.video_path + file[:-3] + 'mp4'))
+        else:
+            frames = self.video_transform(self._load_video(self.video_path + file[:-3] + 'mp4'))
         #print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))
         # repeat if audio is too short
         if samples.shape[0] < samplerate * 10:
@@ -276,7 +316,7 @@ class PerFrameLabels(Dataset):
         self.video_files = []
         self.previous_video = None
         for item in data[:]:
-            self.video_files.append(item )
+            self.video_files.append(item)
         print(len(self.video_files))
         self.count = 0
 
@@ -293,7 +333,6 @@ class PerFrameLabels(Dataset):
                 transforms.Normalize(mean, std)
             ])
             self.video_transform = video_transforms.Compose([
-
 			    volume_transforms.ClipToTensor()
             ])
         else:

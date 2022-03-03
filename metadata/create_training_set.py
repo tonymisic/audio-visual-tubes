@@ -19,14 +19,15 @@ def main():
         testing = {rows[0]:rows[1] for rows in csv.reader(file)}
     all_videos = glob.glob('/media/datadrive/flickr/videos/*')
     all_audio = glob.glob('/media/datadrive/flickr/audio/*.wav')
-    indicies = random.sample(range(0, len(files) - 1), args.subset_size)
-    selected_files = [files[i] for i in indicies]
     map_audio, map_video = {}, {}
     for file in all_audio:
         map_audio[file.split('/')[5].rstrip('.wav')] = 0
     for file in all_videos:
         map_video[file.split('/')[5].rstrip('.mp4')] = 0
-    for name in set(map_audio).intersection(set(map_video)).difference(set(validation)).difference(set(testing)):
+    final_list = list(set(map_audio).intersection(set(map_video)).difference(set(validation)).difference(set(testing)))
+    print(len(final_list))
+    indicies = random.sample(range(0, len(final_list) - 1), len(final_list) - 1)
+    for name in [final_list[i] for i in indicies]:
         savefile = open(args.train_file, "a")
         savefile.write(name + ",0\n") # no classes, would replace 0 with class number if needed
         savefile.close()

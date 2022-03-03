@@ -21,7 +21,7 @@ import wandb
 train  = True
 test = True
 test_hardway = True
-val = False
+val = True
 record = True
 save = True
 selected_hardway_qualitative = [0, 12, 145]
@@ -48,7 +48,7 @@ def get_arguments():
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=16, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=256, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -60,7 +60,7 @@ def get_arguments():
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
     parser.add_argument('--n_threads',default=4,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
-    parser.add_argument('--frame_density',default=16,type=int,help='Training frame sampling density')
+    parser.add_argument('--frame_density',default=1,type=int,help='Training frame sampling density')
     # novel arguments
     parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
     return parser.parse_args() 
@@ -119,21 +119,19 @@ def main():
                 print("Training Step: " + str(step) + "/" + str(len(dataloader)))
                 model.train()
                 sample_loss = 0.0
-                for count, i in enumerate(range(frames.size(2))):
-                    spec = Variable(spec).cuda()
-                    heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
-                    target = torch.zeros(out.shape[0]).cuda().long()     
-                    loss = criterion(out, target)
-                    optim.zero_grad()
-                    loss.backward()
-                    optim.step()
-                    sample_loss += float(loss)
-                running_loss += sample_loss / (count + 1)
+                spec = Variable(spec).cuda()
+                heatmap, out, _, _ = model(frames.float(), spec.float())
+                target = torch.zeros(out.shape[0]).cuda().long()     
+                loss = criterion(out, target)
+                optim.zero_grad()
+                loss.backward()
+                optim.step()
+                sample_loss += float(loss)
                 if record:
                     wandb.log({"step": step,
-                               "batch_loss": running_loss
+                               "batch_loss": sample_loss / float(step + 1)
                     })
-            final_loss = running_loss / float(step + 1)
+            final_loss = sample_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
             if record:
