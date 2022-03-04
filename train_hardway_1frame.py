@@ -21,7 +21,7 @@ import wandb
 train  = True
 test = True
 test_hardway = True
-val = True
+val = False
 record = True
 save = True
 selected_hardway_qualitative = [0, 12, 145]
@@ -30,13 +30,16 @@ if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr10k",
+            "dataset": "flickr54k",
             "testset": 9,
+            "frames": 1,
             "lr": 1e-6,
             "epochs": 200,
-            "batch_size": 16
+            "batch_size": 256
         }
     )
+    wandb.run.name = "lr: 1e-6, center frame, 54k"
+    wandb.run.save()
 
 def get_arguments():
     parser = argparse.ArgumentParser()
@@ -118,7 +121,6 @@ def main():
             for step, (frames, spec, _, _, name) in enumerate(dataloader):
                 print("Training Step: " + str(step) + "/" + str(len(dataloader)))
                 model.train()
-                sample_loss = 0.0
                 spec = Variable(spec).cuda()
                 heatmap, out, _, _ = model(frames.float(), spec.float())
                 target = torch.zeros(out.shape[0]).cuda().long()     
@@ -126,12 +128,12 @@ def main():
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
-                sample_loss += float(loss)
+                running_loss += float(loss)
                 if record:
                     wandb.log({"step": step,
-                               "batch_loss": sample_loss / float(step + 1)
+                               "batch_loss": running_loss / float(step + 1)
                     })
-            final_loss = sample_loss / float(step + 1)
+            final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
             if record:

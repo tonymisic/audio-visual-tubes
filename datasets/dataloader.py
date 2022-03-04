@@ -219,6 +219,7 @@ class SubSampledFlickr(Dataset):
                 counter += 1
             cap.release()
             return frames
+    
     def _load_middleframe(self, path):
         cap = cv2.VideoCapture(path)
         frame_middle = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) / 2)

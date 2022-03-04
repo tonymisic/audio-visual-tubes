@@ -30,13 +30,16 @@ if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr10k",
+            "dataset": "flickr54k",
             "testset": 9,
+            "frames": 16,
             "lr": 1e-6,
             "epochs": 200,
             "batch_size": 16
         }
     )
+    wandb.run.name = "lr: 1e-6, 16 frames, 54k"
+    wandb.run.save()
 
 def get_arguments():
     parser = argparse.ArgumentParser()
@@ -255,7 +258,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_16frm_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()
