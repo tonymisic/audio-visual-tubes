@@ -5,7 +5,7 @@ from matplotlib.style import available
 video_download_folder = '/media/datadrive/flickr/videos/'
 audio_folder = '/media/datadrive/flickr/audio/'
 download_file = 'metadata/urls_public.txt'
-training_file = '/home/tmisic/audio-visual-tubes/metadata/flickr_train.csv'
+training_file = '/home/tmisic/audio-visual-tubes/metadata/flickr_test.csv'
 
 def good_video(path):
     cap = cv2.VideoCapture(path)
@@ -75,6 +75,27 @@ def download():
         print("Video count: " + str(success_count) + " Possible Downloads" + str(left_count) + \
             " Download errors: " + str(download_error_count) + " Corrupted: " + str(corrupted_count))
 
+def download_defined():
+    possible_downloads = get_possible()
+    already_done = get_finished()
+    available_audio = get_audio()
+    for file in already_done.keys():
+        if file not in available_audio and file in possible_downloads:
+            try:
+                urllib.request.urlretrieve(possible_downloads[file], video_download_folder + file + '.mp4')
+                if good_video(video_download_folder + file + '.mp4') and good_audio(audio_folder + file + '.wav'):
+                    print("Downloaded " + file + " successfully.")
+                    success_count += 1
+                else:
+                    corrupted_count += 1
+                    #subprocess.call(['rm', video_download_folder + file + '.mp4'])
+                    #subprocess.call(['rm', audio_folder + file + '.wav'])
+                    print("File " + file + " was corrupted, removed audio and video.")
+            except:
+                download_error_count += 1
+                #subprocess.call(['rm', audio_folder + file + '.wav'])
+                print("File " + file + " was unreachable, removed linked audio.")
+
 def clean_up():
     completed = get_finished()
     all_videos = glob.glob(video_download_folder + '/*')
@@ -85,4 +106,4 @@ def clean_up():
         i += 1
         print("Progress: " + str(i) + "/" + str(count))
 
-download()
+download_defined()

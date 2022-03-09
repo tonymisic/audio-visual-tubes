@@ -38,7 +38,7 @@ if record:
             "batch_size": 256
         }
     )
-    wandb.run.name = "lr: 1e-6, center frame, 54k"
+    wandb.run.name = "lr: 1e-6, center frame, 144k"
     wandb.run.save()
 
 def get_arguments():
@@ -97,7 +97,7 @@ def main():
         model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train')
+    dataset = SubSampledFlickr(args,  mode='train', subset=144)
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -255,7 +255,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_1frm_144k_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()

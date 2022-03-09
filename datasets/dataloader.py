@@ -97,10 +97,8 @@ class GetAudioVideoDataset(Dataset):
         spectrogram = self.aid_transform(spectrogram)
         return frame,spectrogram,resamples,file,torch.tensor(frame_ori)
 
-
-
 class SubSampledFlickr(Dataset):
-    def __init__(self, args, mode='train', transforms=None):
+    def __init__(self, args, mode='train', subset=144, transforms=None):
         self.args = args
         self.middle_sample = False
         self.backup_singleframe = None
@@ -112,8 +110,17 @@ class SubSampledFlickr(Dataset):
             self.training_samples = args.frame_density
             self.training_samplerate = args.frame_density
         data = []
+        assert subset in [5, 10, 20, 144]
+        self.subset = subset
         if args.testset == 'flickr':
-            traincsv = 'metadata/flickr_train.csv'
+            if subset == 144:
+                traincsv = 'metadata/flickr_train144k.csv'
+            elif subset == 20:
+                traincsv = 'metadata/flickr_train20k.csv'
+            elif subset == 10:
+                traincsv = 'metadata/flickr_train10k.csv'
+            elif subset == 5:
+                traincsv = 'metadata/flickr_train5k.csv'
             testcsv = 'metadata/flickr_test.csv'
         elif args.testset == 'vggss':
             traincsv = 'metadata/vggss_train.csv'

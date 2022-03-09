@@ -11,7 +11,7 @@ def get_arguments():
 
 def main():
     args = get_arguments()
-    assert args.subset_size in [5000, 10000, 144000], "Subset invalid"
+    assert args.subset_size in [5000, 10000, 20000, 144000], "Subset invalid"
     files = os.listdir(args.video_path)
     with open(args.val_file, 'r') as file:
         validation = {rows[0]:rows[1] for rows in csv.reader(file)}

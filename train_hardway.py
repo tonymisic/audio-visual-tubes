@@ -30,15 +30,15 @@ if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr54k",
+            "dataset": "flickr144k",
             "testset": 9,
             "frames": 16,
             "lr": 1e-6,
             "epochs": 200,
-            "batch_size": 16
+            "batch_size": 64
         }
     )
-    wandb.run.name = "lr: 1e-6, 16 frames, 54k"
+    wandb.run.name = "lr: 1e-6, 16 frames, 144k"
     wandb.run.save()
 
 def get_arguments():
@@ -51,7 +51,7 @@ def get_arguments():
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=16, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=64, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -97,7 +97,7 @@ def main():
         model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train')
+    dataset = SubSampledFlickr(args,  mode='train', subset=144)
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -258,7 +258,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_16frm_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_16frm_144k_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()
