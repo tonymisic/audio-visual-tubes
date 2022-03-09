@@ -1,3 +1,4 @@
+from turtle import down
 import urllib.request, cv2, soundfile as sf, csv, glob, subprocess
 from matplotlib.style import available
 
@@ -73,5 +74,15 @@ def download():
         left_count -= 1
         print("Video count: " + str(success_count) + " Possible Downloads" + str(left_count) + \
             " Download errors: " + str(download_error_count) + " Corrupted: " + str(corrupted_count))
+
+def clean_up():
+    completed = get_finished()
+    all_videos = glob.glob(video_download_folder + '/*')
+    i, count = 0, len(all_videos)
+    for vid in all_videos:
+        if vid.split('/')[5].split('.')[0] not in completed:
+            subprocess.call(['rm', video_download_folder + vid.split('/')[5]])
+        i += 1
+        print("Progress: " + str(i) + "/" + str(count))
 
 download()

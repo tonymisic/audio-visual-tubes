@@ -20,13 +20,14 @@ def main():
     all_videos = glob.glob('/media/datadrive/flickr/videos/*')
     all_audio = glob.glob('/media/datadrive/flickr/audio/*.wav')
     map_audio, map_video = {}, {}
+
     for file in all_audio:
         map_audio[file.split('/')[5].rstrip('.wav')] = 0
     for file in all_videos:
-        map_video[file.split('/')[5].rstrip('.mp4')] = 0
-    final_list = list(set(map_audio).intersection(set(map_video)).difference(set(validation)).difference(set(testing)))
+        map_video[file.split('/')[5].split('.')[0]] = 0
+    final_list = list(set(map_video).intersection(set(map_audio)).difference(set(validation)).difference(set(testing)))
     print(len(final_list))
-    indicies = random.sample(range(0, len(final_list) - 1), len(final_list) - 1)
+    indicies = random.sample(range(0, len(final_list) - 1), args.subset_size)
     for name in [final_list[i] for i in indicies]:
         savefile = open(args.train_file, "a")
         savefile.write(name + ",0\n") # no classes, would replace 0 with class number if needed
