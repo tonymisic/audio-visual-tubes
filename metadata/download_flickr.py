@@ -49,6 +49,13 @@ def get_audio():
         map[line.split('/')[5].rstrip('.wav')] = line
     return map
 
+def get_video():
+    temp = glob.glob(video_download_folder + "*.mp4")
+    map = {}
+    for line in temp:
+        map[line.split('/')[5].split('.')[0]] = line
+    return map
+
 def download():
     possible_downloads = get_possible()
     already_done = get_finished()
@@ -79,8 +86,10 @@ def download_defined():
     possible_downloads = get_possible()
     already_done = get_finished()
     available_audio = get_audio()
+    available_video = get_video()
+    success_count, corrupted_count, download_error_count = 0, 0, 0
     for file in already_done.keys():
-        if file not in available_audio and file in possible_downloads:
+        if file not in available_video and file in possible_downloads:
             try:
                 urllib.request.urlretrieve(possible_downloads[file], video_download_folder + file + '.mp4')
                 if good_video(video_download_folder + file + '.mp4') and good_audio(audio_folder + file + '.wav'):
@@ -95,7 +104,7 @@ def download_defined():
                 download_error_count += 1
                 #subprocess.call(['rm', audio_folder + file + '.wav'])
                 print("File " + file + " was unreachable, removed linked audio.")
-
+        print(str(success_count) + "/" + str(len(already_done)))
 def clean_up():
     completed = get_finished()
     all_videos = glob.glob(video_download_folder + '/*')

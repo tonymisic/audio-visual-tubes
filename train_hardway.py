@@ -6,11 +6,11 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 from utils import *
-import numpy as np
+import numpy as np, time
 import argparse, torch.optim as optim 
 from model import AVENet
 from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
-import cv2
+import cv2, einops
 from sklearn.metrics import auc
 from PIL import Image
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -22,8 +22,8 @@ train  = True
 test = True
 test_hardway = True
 val = False
-record = True
-save = True
+record = False
+save = False
 selected_hardway_qualitative = [0, 12, 145]
 selected_whole_qualitative = [0, 3, 5]
 if record:
@@ -35,7 +35,7 @@ if record:
             "frames": 16,
             "lr": 1e-6,
             "epochs": 200,
-            "batch_size": 64
+            "batch_size": 16
         }
     )
     wandb.run.name = "lr: 1e-6, 16 frames, 144k"
@@ -51,7 +51,7 @@ def get_arguments():
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=64, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=16, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -61,7 +61,7 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=4,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=1,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     parser.add_argument('--frame_density',default=16,type=int,help='Training frame sampling density')
     # novel arguments
@@ -118,10 +118,30 @@ def main():
         # Train
         if train:
             running_loss = 0.0
+            sum_time = 0.0
             for step, (frames, spec, _, _, name) in enumerate(dataloader):
                 print("Training Step: " + str(step) + "/" + str(len(dataloader)))
                 model.train()
                 sample_loss = 0.0
+
+
+                # start_time = time.time() Step 70: 0.966s avg
+                # spec = Variable(spec).cuda()
+                # spec = spec.unsqueeze(2).repeat(1, 1, 16, 1, 1) # b x c x t x h x w
+                # spec = einops.rearrange(spec, 'b c t h w -> (b t) c h w')
+                # heatmap, out, _, _ = model(einops.rearrange(frames, 'b c t h w -> (b t) c h w').float(), spec.float())
+                # heatmap = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
+                # target = torch.zeros(out.shape[0]).cuda().long()     
+                # loss = criterion(out, target)
+                # optim.zero_grad()
+                # loss.backward()
+                # optim.step()
+                # sample_loss += float(loss)
+                # sum_time += (time.time() - start_time)
+                # print("Avg Time taken: %ss" % (sum_time / (step + 1)))
+
+
+                start_time = time.time()
                 for count, i in enumerate(range(frames.size(2))):
                     spec = Variable(spec).cuda()
                     heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
@@ -131,10 +151,14 @@ def main():
                     loss.backward()
                     optim.step()
                     sample_loss += float(loss)
-                running_loss += sample_loss / (count + 1)
+                sum_time += (time.time() - start_time)
+                print("Avg Time taken: %ss" % (sum_time / (step + 1)))
+
+
+                #running_loss += sample_loss / (count + 1)
                 if record:
                     wandb.log({"step": step,
-                               "batch_loss": running_loss
+                               "batch_loss": running_loss / float(step + 1)
                     })
             final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
@@ -166,7 +190,7 @@ def main():
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
                         iou.append(ciou)
                         if step in selected_whole_qualitative and record:
-                            save_image(frames[:,:,i,:,:].float(), name + "_test_frame_" + str(i), pred, gt_map)
+                            save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
                     results = []
                     for i in range(21):
                         result = np.sum(np.array(iou) >= 0.05 * i)
@@ -203,7 +227,7 @@ def main():
                         ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
                         iou.append(ciou)
                         if step in selected_hardway_qualitative and record:
-                            save_image(image.float(), "hardway_test_" + name, pred, gt_map)
+                            save_image(image.float(), "hardway_test_" + name[0], pred, gt_map)
                 results = []
                 for i in range(21):
                     result = np.sum(np.array(iou) >= 0.05 * i)

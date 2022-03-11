@@ -30,12 +30,12 @@ if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr54k",
+            "dataset": "flickr144k",
             "testset": 9,
             "frames": 1,
             "lr": 1e-6,
             "epochs": 200,
-            "batch_size": 256
+            "batch_size": 200
         }
     )
     wandb.run.name = "lr: 1e-6, center frame, 144k"
@@ -51,7 +51,7 @@ def get_arguments():
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=256, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=200, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -163,7 +163,7 @@ def main():
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
                         iou.append(ciou)
                         if step in selected_whole_qualitative and record:
-                            save_image(frames[:,:,i,:,:].float(), name + "_test_frame_" + str(i), pred, gt_map)
+                            save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
                     results = []
                     for i in range(21):
                         result = np.sum(np.array(iou) >= 0.05 * i)
@@ -200,7 +200,7 @@ def main():
                         ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
                         iou.append(ciou)
                         if step in selected_hardway_qualitative and record:
-                            save_image(image.float(), "hardway_test_" + name, pred, gt_map)
+                            save_image(image.float(), "hardway_test_" + name[0], pred, gt_map)
                 results = []
                 for i in range(21):
                     result = np.sum(np.array(iou) >= 0.05 * i)

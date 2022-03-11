@@ -8,7 +8,6 @@ from torchvision.transforms.functional import crop
 from torchvideotransforms import video_transforms, volume_transforms
 
 class GetAudioVideoDataset(Dataset):
-
     def __init__(self, args, mode='train', transforms=None):
         data = []
         if args.testset == 'flickr':
@@ -246,7 +245,6 @@ class SubSampledFlickr(Dataset):
                 return Image.fromarray(np.asarray(self.backup_singleframe)).convert('RGB')
 
     def sampleframes(self, length):
-        indicies = []
         overlap = (length - 1) - (self.training_samples * self.training_samplerate)
         if overlap < 0: # repeat video
             while length - 1 <= (self.training_samples * self.training_samplerate):
@@ -268,6 +266,7 @@ class SubSampledFlickr(Dataset):
             if len(a) < 16: # indexing error, will stop dataloader in its tracks
                 print("Array: " + str(a) + " Length: " + str(len(a)) + " Middle index: " + middle_index)
             return a
+
     def __len__(self):
         return len(self.video_files)  # self.length
 
