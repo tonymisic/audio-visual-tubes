@@ -23,14 +23,15 @@ test = True
 test_hardway = True
 val = False
 record = True
-save = True
+record_qualitative = False
+save = False
 selected_hardway_qualitative = [0, 12, 145]
 selected_whole_qualitative = [0, 3, 5]
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr144k",
+            "dataset": "flickr10k",
             "testset": 9,
             "frames": 1,
             "lr": 1e-6,
@@ -38,7 +39,7 @@ if record:
             "batch_size": 200
         }
     )
-    wandb.run.name = "lr: 1e-6, center frame, 144k"
+    wandb.run.name = "lr: 1e-6, center frame, 10k, jpgs"
     wandb.run.save()
 
 def get_arguments():
@@ -97,7 +98,7 @@ def main():
         model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train', subset=144)
+    dataset = SubSampledFlickr(args,  mode='train', subset=10)
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -162,7 +163,7 @@ def main():
                         evaluator = Evaluator() 
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
                         iou.append(ciou)
-                        if step in selected_whole_qualitative and record:
+                        if step in selected_whole_qualitative and record_qualitative:
                             save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
                     results = []
                     for i in range(21):
@@ -199,7 +200,7 @@ def main():
                         evaluator = Evaluator()
                         ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
                         iou.append(ciou)
-                        if step in selected_hardway_qualitative and record:
+                        if step in selected_hardway_qualitative and record_qualitative:
                             save_image(image.float(), "hardway_test_" + name[0], pred, gt_map)
                 results = []
                 for i in range(21):
@@ -255,7 +256,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_1frm_144k_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_1frm_10k_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()

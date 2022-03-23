@@ -22,15 +22,15 @@ train  = True
 test = True
 test_hardway = True
 val = False
-record = False
-save = False
+record = True
+save = True
 selected_hardway_qualitative = [0, 12, 145]
 selected_whole_qualitative = [0, 3, 5]
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr144k",
+            "dataset": "flickr10k",
             "testset": 9,
             "frames": 16,
             "lr": 1e-6,
@@ -38,7 +38,7 @@ if record:
             "batch_size": 16
         }
     )
-    wandb.run.name = "lr: 1e-6, 16 frames, 144k"
+    wandb.run.name = "lr: 1e-6, 16 frames, 10k"
     wandb.run.save()
 
 def get_arguments():
@@ -97,7 +97,7 @@ def main():
         model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train', subset=144)
+    dataset = SubSampledFlickr(args,  mode='train', subset=10)
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -282,7 +282,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_16frm_144k_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_16frm_10k_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()

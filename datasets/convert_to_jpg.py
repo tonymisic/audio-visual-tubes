@@ -30,12 +30,17 @@ def get_frames(path):
     indicies = sampleframes(length, 16, 16)
     if length < 2:
         return False
+    backup_frame = []
     for index in indicies:
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(index % length))
         success, image = cap.read()
         if not success and frame_counter < length:
-            return False
+            if backup_frame != []:
+                frames.append(backup_frame)
+            else:
+                return False
         else:
+            backup_frame = image
             frames.append(image)
         frame_counter += 1
     cap.release()
@@ -44,6 +49,7 @@ def get_frames(path):
 def to_jpgs():
     video_folder = '/media/datadrive/flickr/videos/'
     videos = glob.glob(video_folder + "*.mp4")
+    count = 0
     for file in videos[1:]:
         frames = get_frames(file)
         if frames != False:
@@ -51,9 +57,18 @@ def to_jpgs():
             for i, frame in enumerate(frames):
                 Image.fromarray(np.asarray(frame)[:,:,::-1]).save(video_folder + file.split('/')[5].split('.')[0] + '/' +  str(i) + '.jpg')
                 print(video_folder + file.split('/')[5].split('.')[0] + '/' +  str(i) + '.jpg')
-                input()
         else:
             print("Missing frame data for video: " + file)
-        break
+        count += 1
+        print("Progress: " + str(count) + "/" + str(len(videos[1:])))
 
-to_jpgs()
+def file_to_jpgs(file):
+    video_folder = '/media/datadrive/flickr/videos/'
+    frames = get_frames(file)
+    if frames != False:
+        subprocess.call(['mkdir', video_folder + file.split('/')[5].split('.')[0]])
+        for i, frame in enumerate(frames):
+            Image.fromarray(np.asarray(frame)[:,:,::-1]).save(video_folder + file.split('/')[5].split('.')[0] + '/' +  str(i) + '.jpg')
+            print(video_folder + file.split('/')[5].split('.')[0] + '/' +  str(i) + '.jpg')
+    else:
+        print("Missing frame data for video: " + file)

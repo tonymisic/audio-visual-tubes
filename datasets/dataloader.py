@@ -189,29 +189,15 @@ class SubSampledFlickr(Dataset):
         self.aid_transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.0], std=[12.0])])
     
     def _load_video(self, path):
-        cap = cv2.VideoCapture(path)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        indicies, failed, findex = self.sampleframes(frame_count), False, []
-        successful_frame = []
+        indicies = range(self.training_samplerate)
         random.shuffle(indicies) # randomize order of frames
         if self.mode == 'train':
             frames = []
-            for index in indicies:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, int(index % frame_count))
-                success, image = cap.read()
-                if success:
-                    frames.append(image)
-                    successful_frame = image
-                else:
-                    failed = True
-                    findex.append(index)
-            if failed:
-                for i in findex:
-                    print("Frame "+ str(i) +" failed to load for video: " + str(path) + ", loaded backup frame")
-                    frames.append(successful_frame)
-            cap.release()
-            return np.asarray(frames)
-
+            for i in indicies:
+                frames.append(Image.open(path + str(i) + '.jpg').convert('RGB'))
+            return frames
+        
+        cap = cv2.VideoCapture(path)
         if self.mode == 'test':
             counter = 1 # starts at sampling rate index
             frames = []
@@ -227,22 +213,7 @@ class SubSampledFlickr(Dataset):
             return frames
     
     def _load_middleframe(self, path):
-        cap = cv2.VideoCapture(path)
-        frame_middle = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) / 2)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_middle)
-        success, image = cap.read()
-        if success:
-            self.backup_singleframe = image
-            return Image.fromarray(np.asarray(image)).convert('RGB')
-        else:
-            frame_middle += 1
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_middle)
-            success, image = cap.read()
-            if success:
-                self.backup_singleframe = image
-                return Image.fromarray(np.asarray(image)).convert('RGB')
-            else:
-                return Image.fromarray(np.asarray(self.backup_singleframe)).convert('RGB')
+        return Image.open(path).convert('RGB')
 
     def sampleframes(self, length):
         overlap = (length - 1) - (self.training_samples * self.training_samplerate)
@@ -277,9 +248,9 @@ class SubSampledFlickr(Dataset):
         # Video
         #start_time = time.time()
         if self.middle_sample:
-            frames = self.img_transform(self._load_middleframe(self.video_path + file[:-3] + 'mp4'))
+            frames = self.img_transform(self._load_middleframe(self.video_path + file[:-4] + '/7.jpg'))
         else:
-            frames = self.video_transform(self._load_video(self.video_path + file[:-3] + 'mp4'))
+            frames = self.video_transform(self._load_video(self.video_path + file[:-4] + '/'))
         #print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))
         # repeat if audio is too short
         if samples.shape[0] < samplerate * 10:
