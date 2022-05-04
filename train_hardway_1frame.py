@@ -18,28 +18,28 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train  = True
+train = True
 test = True
 test_hardway = True
 val = False
 record = True
 record_qualitative = False
-save = False
+save = True
 selected_hardway_qualitative = [0, 12, 145]
 selected_whole_qualitative = [0, 3, 5]
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr10k",
-            "testset": 9,
+            "dataset": "flickr144k",
+            "testset": 69,
             "frames": 1,
             "lr": 1e-6,
             "epochs": 200,
             "batch_size": 200
         }
     )
-    wandb.run.name = "lr: 1e-6, center frame, 10k, jpgs"
+    wandb.run.name = "Center frame, 144k, Full Test"
     wandb.run.save()
 
 def get_arguments():
@@ -62,11 +62,11 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=4,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=10,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     parser.add_argument('--frame_density',default=1,type=int,help='Training frame sampling density')
     # novel arguments
-    parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
+    parser.add_argument('--sampling_rate', default=16, type=int,help='Sampling rate for frame selection')
     return parser.parse_args() 
 
 def save_image(image, recording_name, pred=None, gt_map=None):
@@ -78,6 +78,11 @@ def save_image(image, recording_name, pred=None, gt_map=None):
             Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.4, np.add(temp * 0.5, temp2 * 0.5) * 0.6))).convert('RGB')
         )
     })
+def save_labels(image, recording_name, gt_map=None):
+    image = normalize_img(image)
+    temp = cv2.applyColorMap(np.uint8(gt_map * 256), cv2.COLORMAP_JET)
+    final = Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.4, temp * 0.6))).convert('RGB')
+    final.save("tmp/" + recording_name + ".jpg")
 
 def main():
     # get all arguments
@@ -98,7 +103,7 @@ def main():
         model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train', subset=10)
+    dataset = SubSampledFlickr(args,  mode='train', subset=144)
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -148,7 +153,7 @@ def main():
                 for step, (frames, spec, _, _, name) in enumerate(testdataloader):
                     print("Testing Step: " + str(step) + "/" + str(len(testdataloader)))
                     iou = []
-                    for i in range(args.sampling_rate, frames.size(2), args.sampling_rate):
+                    for i in range(args.sampling_rate, frames.size(2) - 1, args.sampling_rate):
                         spec = Variable(spec).cuda()
                         heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
                         target = torch.zeros(out.shape[0]).cuda().long() 
@@ -163,6 +168,7 @@ def main():
                         evaluator = Evaluator() 
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
                         iou.append(ciou)
+                        #save_labels(frames[:,:,i,:,:].float(), name[0] + "_" + str(i), gt_map)
                         if step in selected_whole_qualitative and record_qualitative:
                             save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
                     results = []
@@ -256,7 +262,8 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_1frm_10k_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_1frm_144k_ep%s.pth.tar' % (str(epoch)) 
             )
+        break
 if __name__ == "__main__":
     main()

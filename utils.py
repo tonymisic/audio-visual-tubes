@@ -86,7 +86,7 @@ def testset_gt(args,name):
 def testset_gt_frame(args,name,frame):
 
     if args.testset == 'flickr':
-        gt = ET.parse(args.gt_path + '%s_%s.xml' % (name[:-4], str(frame))).getroot()
+        gt = ET.parse(args.og_gt_path + '%s_%s.xml' % (name[:-4], str(frame))).getroot()
         gt_map = np.zeros([224,224])
         bboxs = []
         for child in gt: 
@@ -118,3 +118,6 @@ def testset_gt_frame(args,name,frame):
         gt_map[gt_map>0] = 1
     return gt_map
 
+def mTC(predictions):
+    
+    return None

@@ -189,7 +189,7 @@ class SubSampledFlickr(Dataset):
         self.aid_transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.0], std=[12.0])])
     
     def _load_video(self, path):
-        indicies = range(self.training_samplerate)
+        indicies = list(range(self.training_samplerate))
         random.shuffle(indicies) # randomize order of frames
         if self.mode == 'train':
             frames = []
@@ -248,7 +248,7 @@ class SubSampledFlickr(Dataset):
         # Video
         #start_time = time.time()
         if self.middle_sample:
-            frames = self.img_transform(self._load_middleframe(self.video_path + file[:-4] + '/7.jpg'))
+            frames = self.img_transform(self._load_middleframe(self.video_path + file[:-4] + '/8.jpg'))
         else:
             frames = self.video_transform(self._load_video(self.video_path + file[:-4] + '/'))
         #print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))

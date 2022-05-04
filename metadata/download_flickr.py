@@ -2,10 +2,10 @@ from turtle import down
 import urllib.request, cv2, soundfile as sf, csv, glob, subprocess
 from matplotlib.style import available
 
-video_download_folder = '/media/datadrive/flickr/videos/'
-audio_folder = '/media/datadrive/flickr/audio/'
+video_download_folder = '/media/datadrive/flickr/FLICKR_5k/videos/'
+audio_folder = '/media/datadrive/flickr/FLICKR_5k/audio/'
 download_file = 'metadata/urls_public.txt'
-training_file = '/home/tmisic/audio-visual-tubes/metadata/flickr_test.csv'
+training_file = '/home/tmisic/audio-visual-tubes/metadata/flickr_test_hardway.csv'
 
 def good_video(path):
     cap = cv2.VideoCapture(path)
@@ -53,7 +53,7 @@ def get_video():
     temp = glob.glob(video_download_folder + "*.mp4")
     map = {}
     for line in temp:
-        map[line.split('/')[5].split('.')[0]] = line
+        map[line.split('/')[6].split('.')[0]] = line
     return map
 
 def download():
@@ -105,6 +105,7 @@ def download_defined():
                 #subprocess.call(['rm', audio_folder + file + '.wav'])
                 print("File " + file + " was unreachable, removed linked audio.")
         print(str(success_count) + "/" + str(len(already_done)))
+
 def clean_up():
     completed = get_finished()
     all_videos = glob.glob(video_download_folder + '/*')
@@ -115,4 +116,17 @@ def clean_up():
         i += 1
         print("Progress: " + str(i) + "/" + str(count))
 
-download_defined()
+def download_hardway():
+    available_video = get_video() 
+    count = 0
+    for file in available_video.keys():
+        if good_video(video_download_folder + file + '.mp4'):
+            if good_audio(audio_folder + file + '.wav'):
+                subprocess.call(['cp', video_download_folder + file + '.mp4', '/media/datadrive/flickr/FLICKR_5k/clean_videos/' + file + '.mp4'])
+                count += 1
+            else:
+                print("Bad audio")
+        else:
+            print("Bad Video")
+        print("Working: " + str(count))
+download_hardway()

@@ -27,9 +27,9 @@ def sampleframes(length, training_samples, training_samplerate):
 def get_frames(path):
     cap = cv2.VideoCapture(path)
     frame_counter, success, frames, length = 0, True, [], int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    indicies = sampleframes(length, 16, 16)
     if length < 2:
         return False
+    indicies = sampleframes(length, 16, 16)
     backup_frame = []
     for index in indicies:
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(index % length))
@@ -72,3 +72,23 @@ def file_to_jpgs(file):
             print(video_folder + file.split('/')[5].split('.')[0] + '/' +  str(i) + '.jpg')
     else:
         print("Missing frame data for video: " + file)
+
+
+def hardway_to_jpgs():
+    video_folder = '/media/datadrive/flickr/FLICKR_5k/videos/'
+    save_folder = '/media/datadrive/flickr/FLICKR_5k/my_frames/'
+    videos = glob.glob(video_folder + "*.mp4")
+    count, fail = 0, 0
+    for file in videos:
+        frames = get_frames(file)
+        if frames != False:
+            frame = frames[7]
+            Image.fromarray(np.asarray(frame)[:,:,::-1]).save(save_folder + file.split('/')[6].split('.')[0] + '.jpg')
+            print(save_folder + file.split('/')[6].split('.')[0] + '.jpg')
+        else:
+            print("Missing frame data for video: " + file)
+            fail += 1
+        count += 1
+        print("Progress: " + str(count) + "/" + str(len(videos)) + " Failed: " + str(fail))
+
+hardway_to_jpgs()
