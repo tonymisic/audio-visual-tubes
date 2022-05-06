@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from models import base_models
 from models import resnet3D
+import einops
 #
 # MY MODEL
 #
@@ -19,7 +20,7 @@ class FullModel(nn.Module):
         self.audnet = base_models.resnet18(modal='audio')
         self.avgpool = nn.AdaptiveMaxPool2d((1, 1))
         self.vidnet.layer4.register_forward_hook(get_activation(selected_layer))
-        self.attention = AttentionModel(512)
+        self.attention = HardWayAttention()
         
     def forward(self, audio, video):
         # audio editing
@@ -30,16 +31,42 @@ class FullModel(nn.Module):
         # video editing
         _ = self.vidnet(video)
         vid = activation[selected_layer]
-        attn_output = self.attention(aud, vid.permute([0, 2, 3, 4, 1]))
-        return attn_output
+        vid = nn.functional.normalize(vid, dim=1)
+        return self.attention(aud, vid)
 
-class AttentionModel(nn.Module):
-    def __init__(self, latent):
-        super(AttentionModel, self).__init__()
+class HardWayAttention(nn.Module):
+    def __init__(self):
+        super(HardWayAttention, self).__init__()
+        self.sigmoid = nn.Sigmoid()
+        self.epsilon = 0.65
+        self.epsilon2 = 0.4
+        self.tau = 0.03
+
+    def forward(self, audio_features, video_features):
+        B = video_features.shape[0] * video_features.shape[2]
+        mask = ( 1 -100 * torch.eye(B,B)).cuda()
+        video_features = einops.rearrange(video_features, 'b c t h w -> (b t) c h w').cuda()
+        A = torch.einsum('ncqa,nchw->nqa', [video_features, audio_features.unsqueeze(2).unsqueeze(3).cuda()]).unsqueeze(1)
+        A0 = torch.einsum('ncqa,ckhw->nkqa', [video_features, audio_features.T.unsqueeze(2).unsqueeze(3).cuda()])
+        Pos = self.sigmoid((A - self.epsilon) / self.tau)
+        Pos2 = self.sigmoid((A - self.epsilon2) / self.tau) 
+        Neg = 1 - Pos2
+        Pos_all =  self.sigmoid((A0 - self.epsilon)/self.tau) 
+        sim1 = (Pos * A).view(*A.shape[:2],-1).sum(-1) / (Pos.view(*Pos.shape[:2],-1).sum(-1))
+        sim = ((Pos_all * A0).view(*A0.shape[:2],-1).sum(-1) / Pos_all.view(*Pos_all.shape[:2],-1).sum(-1) ) * mask
+        sim2 = (Neg * A).view(*A.shape[:2],-1).sum(-1) / Neg.view(*Neg.shape[:2],-1).sum(-1)
+        logits = torch.cat((sim1,sim,sim2),1)/0.07
+        return A, logits
+
+class TransformerAttention(nn.Module):
+    def __init__(self):
+        super(TransformerAttention, self).__init__()
+        latent = 512
         self.key_linear = nn.Linear(latent, latent)
         self.query_linear = nn.Linear(latent, latent)
         self.value_linear = nn.Linear(latent, latent)
         self.softmax = nn.Softmax(dim=-1)
+
     def forward(self, audio_features, video_features):
         key = self.key_linear(video_features)
         query = self.query_linear(audio_features)
@@ -93,7 +120,7 @@ class AVENet(nn.Module):
         aud = self.avgpool(aud).view(B,-1)
         aud = nn.functional.normalize(aud, dim=1)
         # Join them
-        A = torch.einsum('ncqa,nchw->nqa', [img, aud.unsqueeze(2).unsqueeze(3)]).unsqueeze(1)
+        A = torch.einsum('ncqa,nchw->nqa', [img, aud.unsqueeze(2).unsqueeze(3)]).unsqueeze(1) # img = [80, 512, 14, 14] aud = [80, 512]
         A0 = torch.einsum('ncqa,ckhw->nkqa', [img, aud.T.unsqueeze(2).unsqueeze(3)])
 
         # trimap

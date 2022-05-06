@@ -118,6 +118,20 @@ def testset_gt_frame(args,name,frame):
         gt_map[gt_map>0] = 1
     return gt_map
 
-def mTC(predictions):
+def mTC(predictions, gt_maps):
+    assert len(predictions) == len(gt_maps)
+    cious = torch.zeros(len(predictions) - 1)
+    for i in range(len(predictions) - 1):
+        evaluator = Evaluator()
+        ciou,_,_ = evaluator.cal_CIOU(predictions[i], predictions[i + 1], 0.5)
+        cious[i] = ciou
+    return torch.div(torch.sum(cious, dim=0), len(predictions) - 1)
     
-    return None
+    # gives ~96% acc without training
+    # assert len(predictions) == len(gt_maps)
+    # cious = torch.zeros(len(predictions))
+    # for i in range(len(predictions)):
+    #     evaluator = Evaluator()
+    #     ciou,_,_ = evaluator.cal_CIOU(predictions[i], gt_maps[i], 0.5)
+    #     cious[i] = ciou
+    # return 1 - torch.div(torch.sum(torch.abs(torch.diff(cious, dim=0))), len(predictions) - 1)

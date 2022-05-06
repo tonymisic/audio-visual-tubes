@@ -51,10 +51,10 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=0,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=10,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     # novel arguments
-    parser.add_argument('--sampling_rate', default=20, type=int,help='Sampling rate for frame selection')
+    parser.add_argument('--sampling_rate', default=16, type=int,help='Sampling rate for frame selection')
     return parser.parse_args()
 
 def save_image(image, index, pred=None, gt_map=None):
@@ -108,8 +108,6 @@ def main():
                 loss.backward()
                 optim.step()
                 running_loss += float(loss)
-                if record:
-                    wandb.log({"step": step})
             final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()

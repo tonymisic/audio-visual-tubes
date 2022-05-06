@@ -13,12 +13,13 @@ from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
 import cv2, einops
 from sklearn.metrics import auc
 from PIL import Image
+from losses import NPRatio
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1,5,6"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train  = True
+train = True
 test = True
 test_hardway = True
 val = False
@@ -31,7 +32,7 @@ if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
             "Model": "Hard Way",
-            "dataset": "flickr144k",
+            "dataset": "flickr10k",
             "testset": 69,
             "frames": 16,
             "lr": 1e-6,
@@ -39,7 +40,7 @@ if record:
             "batch_size": 20
         }
     )
-    wandb.run.name = "16 frames, 144k, Full Test"
+    wandb.run.name = "16 frames, 10k, HardWay + NP Loss"
     wandb.run.save()
 
 def get_arguments():
@@ -98,7 +99,7 @@ def main():
         model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train', subset=144)
+    dataset = SubSampledFlickr(args,  mode='train', subset=10)
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -108,6 +109,7 @@ def main():
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
+    criterion2 = NPRatio(14 * 14)
     print("Loaded dataloader and loss function.")
     # optimiser
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -116,7 +118,7 @@ def main():
     if record:
         wandb.watch(model, optim, log="all", log_freq=1000)
     for epoch in range(args.epochs):
-        # Train
+        
         if train:
             running_loss = 0.0
             for step, (frames, spec, _, _, name) in enumerate(dataloader):
@@ -129,14 +131,11 @@ def main():
                 heatmap = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
                 target = torch.zeros(out.shape[0]).cuda().long()
                 loss = criterion(out, target)
+                loss2 = criterion2(heatmap, 0.65, device)
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
-                running_loss += float(loss)
-                if record:
-                    wandb.log({"step": step,
-                               "batch_loss": running_loss / float(step + 1)
-                    })
+                running_loss += float((loss * 0.5) + (loss2 * 0.5))
             final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
@@ -147,10 +146,10 @@ def main():
         if test:
             with torch.no_grad():
                 model.eval()
-                ious,aucs = [], []
+                ious,aucs, mTCs = [], [], []
                 for step, (frames, spec, _, _, name) in enumerate(testdataloader):
                     print("Testing Step: " + str(step) + "/" + str(len(testdataloader)))
-                    iou = []
+                    iou, preds, gt_maps = [], [], []
                     for i in range(args.sampling_rate, frames.size(2) - 1, args.sampling_rate):
                         spec = Variable(spec).cuda()
                         heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
@@ -165,9 +164,12 @@ def main():
                         gt_map = testset_gt_frame(args, name[0], i)
                         evaluator = Evaluator() 
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
+                        preds.append(pred)
+                        gt_maps.append(gt_map)
                         iou.append(ciou)
                         if step in selected_whole_qualitative and record_qualitative:
                             save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
+                    mTCs.append(float(mTC(preds, gt_maps)))
                     results = []
                     for i in range(21):
                         result = np.sum(np.array(iou) >= 0.05 * i)
@@ -179,9 +181,10 @@ def main():
                     aucs.append(auc_)
                 print("Testing cIoU ", np.sum(ious) / len(ious))
                 print("Testing auc ", np.sum(aucs) / len(aucs))
+                print("Testing mTC ", np.sum(mTCs) / len(mTCs))
                 if record:
-                    wandb.log({ "Testing cIoU": np.sum(ious) / len(ious),
-                                "Testing AUC": np.sum(aucs) / len(aucs)})
+                    wandb.log({ "Testing cIoU": np.sum(ious) / len(ious), "Testing AUC": np.sum(aucs) / len(aucs), "Testing mTC": np.sum(mTCs) / len(mTCs)})
+        
         if test_hardway:
             with torch.no_grad():
                 model.eval()
@@ -215,8 +218,8 @@ def main():
                 print("Hardway Test cIoU ", np.sum(np.array(iou) >= 0.5)/len(iou))
                 print("Hardway Test auc ", auc_)
                 if record:
-                    wandb.log({ "Hardway Test cIoU": np.sum(np.array(iou) >= 0.5)/len(iou),
-                                "Hardway Test AUC": auc_})
+                    wandb.log({ "Hardway Test cIoU": np.sum(np.array(iou) >= 0.5)/len(iou), "Hardway Test AUC": auc_})
+        
         if val:
             with torch.no_grad():
                 model.eval()
@@ -259,8 +262,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_16frm_144k_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_16frm_10k_ep%s.pth.tar' % (str(epoch)) 
             )
-        break
 if __name__ == "__main__":
     main()
