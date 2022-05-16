@@ -18,15 +18,14 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train = True
+train = False
 test = True
-test_hardway = True
+test_hardway = False
 val = False
-record = True
+record = False
 record_qualitative = False
-save = True
-selected_hardway_qualitative = [0, 12, 145]
-selected_whole_qualitative = [0, 3, 5]
+save = False
+selected_whole_qualitative = ['2432219254', '', '', '', '']
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
@@ -80,8 +79,8 @@ def save_image(image, recording_name, pred=None, gt_map=None):
     })
 def save_labels(image, recording_name, gt_map=None):
     image = normalize_img(image)
-    temp = cv2.applyColorMap(np.uint8(gt_map * 256), cv2.COLORMAP_JET)
-    final = Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.4, temp * 0.6))).convert('RGB')
+    temp = cv2.applyColorMap(np.uint8(gt_map * 255), cv2.COLORMAP_JET)
+    final = Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.5, temp * 0.5))).convert('RGB')
     final.save("tmp/" + recording_name + ".jpg")
 
 def main():
@@ -93,14 +92,12 @@ def main():
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
-    # load pretrained model if it exists, off for now
-    if os.path.exists(args.summaries_dir) and False:
-        print('load pretrained')
-        checkpoint = torch.load(args.summaries_dir)
-        model_dict = model.state_dict()
-        pretrained_dict = checkpoint['model_state_dict']
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
+    print('load pretrained')
+    checkpoint = torch.load('checkpoints/model_1frm_10k_ep199.pth.tar')
+    model_dict = model.state_dict()
+    pretrained_dict = checkpoint['model_state_dict']
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
 
     # init datasets
     dataset = SubSampledFlickr(args,  mode='train', subset=10)
@@ -166,7 +163,8 @@ def main():
                         iou.append(ciou)
                         preds.append(pred)
                         gt_maps.append(gt_map)
-                        #save_labels(frames[:,:,i,:,:].float(), name[0] + "_" + str(i), gt_map)
+                        #save_labels(frames[:,:,i,:,:].float(), name[0] + "_gt" + str(i), gt_map)
+                        #save_labels(frames[:,:,i,:,:].float(), name[0] + "_pred" + str(i), pred)
                         if step in selected_whole_qualitative and record_qualitative:
                             save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
                     mTCs.append(float(mTC(preds, gt_maps)))
@@ -206,8 +204,6 @@ def main():
                         evaluator = Evaluator()
                         ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
                         iou.append(ciou)
-                        if step in selected_hardway_qualitative and record_qualitative:
-                            save_image(image.float(), "hardway_test_" + name[0], pred, gt_map)
                 results = []
                 for i in range(21):
                     result = np.sum(np.array(iou) >= 0.05 * i)

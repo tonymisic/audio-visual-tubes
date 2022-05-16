@@ -1,3 +1,4 @@
+from bdb import Breakpoint
 import os
 import torch
 from torch.optim import *
@@ -19,15 +20,14 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1,5,6"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train = True
+train = False
 test = True
-test_hardway = True
+test_hardway = False
 val = False
-record = True
-record_qualitative = False
-save = True
-selected_hardway_qualitative = [0, 12, 145]
-selected_whole_qualitative = [0, 3, 5]
+record = False
+record_qualitative = True
+save = False
+selected_whole_qualitative = ['2432219254.mp4', '3484198977.mp4', '3727937033.mp4', '6458319057.mp4', '10409146004.mp4']
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
@@ -40,7 +40,7 @@ if record:
             "batch_size": 20
         }
     )
-    wandb.run.name = "16 frames, 10k, HardWay + NP Loss"
+    wandb.run.name = "16-10k, HardWay"
     wandb.run.save()
 
 def get_arguments():
@@ -79,24 +79,28 @@ def save_image(image, recording_name, pred=None, gt_map=None):
             Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.4, np.add(temp * 0.5, temp2 * 0.5) * 0.6))).convert('RGB')
         )
     })
+def save_labels(image, recording_name, gt_map=None):
+    image = normalize_img(image)
+    temp = cv2.applyColorMap(np.uint8(gt_map * 255), cv2.COLORMAP_JET)
+    final = Image.fromarray(np.uint8(np.add((image[0].cpu().numpy() * 255).transpose((1,2,0)) * 0.5, temp * 0.5))).convert('RGB')
+    final.save("tmp/" + recording_name + ".jpg")
 
 def main():
     # get all arguments
     args = get_arguments()
     #  gpu and model init
-    device = torch.device("cuda")
+    device = torch.device("cuda") 
     model = AVENet(args)
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
-    # load pretrained model if it exists, off for now
-    if os.path.exists(args.summaries_dir) and False:
-        print('load pretrained')
-        checkpoint = torch.load(args.summaries_dir)
-        model_dict = model.state_dict()
-        pretrained_dict = checkpoint['model_state_dict']
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
+    print('load pretrained')
+    checkpoint = torch.load('checkpoints/model_16frm_10k_ep186.pth.tar')
+    #checkpoint = torch.load('checkpoints/model_16frm_10k_ep186NP.pth.tar')
+    # model_dict = model.state_dict()
+    # pretrained_dict = checkpoint['model_state_dict']
+    # model_dict.update(pretrained_dict)
+    # model.load_state_dict(model_dict)
 
     # init datasets
     dataset = SubSampledFlickr(args,  mode='train', subset=10)
@@ -109,16 +113,19 @@ def main():
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
-    criterion2 = NPRatio(14 * 14)
+    #criterion2 = NPRatio(14 * 14)
     print("Loaded dataloader and loss function.")
-    # optimiser
+    # Optimizers
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    #optim = Adam(model.parameters(), lr=args.learning_rate)
+    #optim = SGD(model.parameters(), lr=args.learning_rate, momentum=0.9)
+    #optim = SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, weight_decay=args.weight_decay)
     print("Optimizer loaded.")
-    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[50,100,150,180], gamma=0.1)
+
+    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[80,100,150,180], gamma=0.1) # changed to 60, 80
     if record:
         wandb.watch(model, optim, log="all", log_freq=1000)
     for epoch in range(args.epochs):
-        
         if train:
             running_loss = 0.0
             for step, (frames, spec, _, _, name) in enumerate(dataloader):
@@ -131,11 +138,12 @@ def main():
                 heatmap = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
                 target = torch.zeros(out.shape[0]).cuda().long()
                 loss = criterion(out, target)
-                loss2 = criterion2(heatmap, 0.65, device)
+                #loss2 = criterion2(heatmap, 0.65, device)
+                #summed_loss = torch.add(loss * 0.5, (loss2 * 400) * 0.5)
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
-                running_loss += float((loss * 0.5) + (loss2 * 0.5))
+                running_loss += float(loss)
             final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
@@ -158,17 +166,17 @@ def main():
                         heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
                         heatmap_now = normalize_img(-heatmap_now)
                         pred = 1 - heatmap_now
-                        threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
-                        pred[pred>threshold] = 1
-                        pred[pred<1] = 0
+                        #threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                        #pred[pred>threshold] = 1
+                        #pred[pred<1] = 0
                         gt_map = testset_gt_frame(args, name[0], i)
                         evaluator = Evaluator() 
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
                         preds.append(pred)
                         gt_maps.append(gt_map)
                         iou.append(ciou)
-                        if step in selected_whole_qualitative and record_qualitative:
-                            save_image(frames[:,:,i,:,:].float(), name[0] + "_test_frame_" + str(i), pred, gt_map)
+                        if name[0] in selected_whole_qualitative and record_qualitative:
+                            save_labels(frames[:,:,i,:,:].float(), name[0] + "_pred" + str(i), pred)
                     mTCs.append(float(mTC(preds, gt_maps)))
                     results = []
                     for i in range(21):
@@ -206,8 +214,6 @@ def main():
                         evaluator = Evaluator()
                         ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
                         iou.append(ciou)
-                        if step in selected_hardway_qualitative and record_qualitative:
-                            save_image(image.float(), "hardway_test_" + name[0], pred, gt_map)
                 results = []
                 for i in range(21):
                     result = np.sum(np.array(iou) >= 0.05 * i)
@@ -264,5 +270,6 @@ def main():
                     'optimizer_state_dict': optim.state_dict()
                 }, args.summaries_dir + 'model_16frm_10k_ep%s.pth.tar' % (str(epoch)) 
             )
+        break
 if __name__ == "__main__":
     main()
