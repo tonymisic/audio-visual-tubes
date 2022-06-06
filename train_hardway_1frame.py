@@ -14,18 +14,18 @@ import cv2
 from sklearn.metrics import auc
 from PIL import Image
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1,5,6"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train = False
+train = True
 test = True
-test_hardway = False
+test_hardway = True
 val = False
-record = False
+record = True
 record_qualitative = False
-save = False
-selected_whole_qualitative = ['2432219254', '', '', '', '']
+save = True
+selected_whole_qualitative = ['2432219254.mp4', '3484198977.mp4', '3727937033.mp4', '6458319057.mp4', '10409146004.mp4']
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
         config={
@@ -35,10 +35,10 @@ if record:
             "frames": 1,
             "lr": 1e-6,
             "epochs": 200,
-            "batch_size": 200
+            "batch_size": 3
         }
     )
-    wandb.run.name = "1 frame, 10k, HardWay"
+    wandb.run.name = "1-10k, HardWay, Train=Original Test"
     wandb.run.save()
 
 def get_arguments():
@@ -51,7 +51,7 @@ def get_arguments():
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=200, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=3, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -61,7 +61,7 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=10,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=3,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     parser.add_argument('--frame_density',default=1,type=int,help='Training frame sampling density')
     # novel arguments
@@ -92,15 +92,16 @@ def main():
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
-    print('load pretrained')
-    checkpoint = torch.load('checkpoints/model_1frm_10k_ep199.pth.tar')
-    model_dict = model.state_dict()
-    pretrained_dict = checkpoint['model_state_dict']
-    model_dict.update(pretrained_dict)
-    model.load_state_dict(model_dict)
+    # print('load pretrained')
+    # checkpoint = torch.load('checkpoints/model_1frm_10k_ep199.pth.tar')
+    # model_dict = model.state_dict()
+    # pretrained_dict = checkpoint['model_state_dict']
+    # model_dict.update(pretrained_dict)
+    # model.load_state_dict(model_dict)
 
     # init datasets
-    dataset = SubSampledFlickr(args,  mode='train', subset=10)
+    #dataset = SubSampledFlickr(args,  mode='train', subset=10)
+    dataset = GetAudioVideoDataset(args, mode='test')
     testdataset = PerFrameLabels(args, mode='test')
     valdataset = PerFrameLabels(args, mode='val')
     original_testset = GetAudioVideoDataset(args, mode='test')
@@ -114,7 +115,7 @@ def main():
     # optimiser
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     print("Optimizer loaded.")
-    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[50,100,150,180], gamma=0.1)
+    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[60,100,150,180], gamma=0.1)
     if record:
         wandb.watch(model, optim, log="all", log_freq=1000)
     for epoch in range(args.epochs):

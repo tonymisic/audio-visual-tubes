@@ -20,12 +20,12 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0,1,5,6"
 import warnings
 warnings.filterwarnings('ignore')
 import wandb
-train = False
-test = True
+train = True
+test = False
 test_hardway = False
 val = False
 record = False
-record_qualitative = True
+record_qualitative = False
 save = False
 selected_whole_qualitative = ['2432219254.mp4', '3484198977.mp4', '3727937033.mp4', '6458319057.mp4', '10409146004.mp4']
 if record:
@@ -53,7 +53,7 @@ def get_arguments():
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
-    parser.add_argument('--batch_size', default=20, type=int, help='Batch Size')
+    parser.add_argument('--batch_size', default=3, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
     parser.add_argument('--epsilon2', default=0.4, type=float, help='neg')
     parser.add_argument('--tri_map',action='store_true')
@@ -63,10 +63,10 @@ def get_arguments():
     # from training code
     parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=10,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=3,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     parser.add_argument('--frame_density',default=16,type=int,help='Training frame sampling density')
-    # novel arguments
+    # new arguments
     parser.add_argument('--sampling_rate', default=16, type=int,help='Sampling rate for frame selection')
     return parser.parse_args() 
 
@@ -94,8 +94,8 @@ def main():
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
-    print('load pretrained')
-    checkpoint = torch.load('checkpoints/model_16frm_10k_ep186.pth.tar')
+    #print('load pretrained')
+    #checkpoint = torch.load('checkpoints/model_16frm_10k_ep186.pth.tar')
     #checkpoint = torch.load('checkpoints/model_16frm_10k_ep186NP.pth.tar')
     # model_dict = model.state_dict()
     # pretrained_dict = checkpoint['model_state_dict']
@@ -117,14 +117,11 @@ def main():
     print("Loaded dataloader and loss function.")
     # Optimizers
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    #optim = Adam(model.parameters(), lr=args.learning_rate)
-    #optim = SGD(model.parameters(), lr=args.learning_rate, momentum=0.9)
-    #optim = SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, weight_decay=args.weight_decay)
     print("Optimizer loaded.")
-
-    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[80,100,150,180], gamma=0.1) # changed to 60, 80
+    scheduler = lr_scheduler.MultiStepLR(optim, milestones=[60,100,150,180], gamma=0.1)
     if record:
         wandb.watch(model, optim, log="all", log_freq=1000)
+    
     for epoch in range(args.epochs):
         if train:
             running_loss = 0.0
@@ -166,9 +163,9 @@ def main():
                         heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
                         heatmap_now = normalize_img(-heatmap_now)
                         pred = 1 - heatmap_now
-                        #threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
-                        #pred[pred>threshold] = 1
-                        #pred[pred<1] = 0
+                        threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                        pred[pred>threshold] = 1
+                        pred[pred<1] = 0
                         gt_map = testset_gt_frame(args, name[0], i)
                         evaluator = Evaluator() 
                         ciou,_,_ = evaluator.cal_CIOU(pred, gt_map, 0.5)
@@ -270,6 +267,5 @@ def main():
                     'optimizer_state_dict': optim.state_dict()
                 }, args.summaries_dir + 'model_16frm_10k_ep%s.pth.tar' % (str(epoch)) 
             )
-        break
 if __name__ == "__main__":
     main()

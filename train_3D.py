@@ -150,7 +150,7 @@ def main():
                 for step, (frames, spec, _, _, name) in enumerate(testdataloader):
                     print("Testing Step: " + str(step) + "/" + str(len(testdataloader)))
                     indicies = list(range(args.sampling_rate, frames.size(2) - 1, args.sampling_rate))
-                    spec = Variable(spec).cuda() # double check this shit
+                    spec = Variable(spec).cuda()
                     heatmap, out = model(spec.float(), frames[:,:,indicies].float())
                     iou, preds, gt_maps = [], [], []
                     for step, i in enumerate(range(args.sampling_rate, frames.size(2) - 1, args.sampling_rate)):

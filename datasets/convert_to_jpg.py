@@ -1,4 +1,4 @@
-import glob, cv2, subprocess, numpy as np
+import glob, cv2, subprocess, numpy as np, csv
 from PIL import Image
 
 def sampleframes(length, training_samples, training_samplerate):
@@ -73,7 +73,6 @@ def file_to_jpgs(file):
     else:
         print("Missing frame data for video: " + file)
 
-
 def hardway_to_jpgs():
     video_folder = '/media/datadrive/flickr/FLICKR_5k/videos/'
     save_folder = '/media/datadrive/flickr/FLICKR_5k/my_frames/'
@@ -91,4 +90,24 @@ def hardway_to_jpgs():
         count += 1
         print("Progress: " + str(count) + "/" + str(len(videos)) + " Failed: " + str(fail))
 
-hardway_to_jpgs()
+def test_to_jpgs():
+    video_folder = '/media/datadrive/flickr/videos/'
+    testcsv, data = 'metadata/flickr_test.csv', []
+    with open(testcsv) as f:
+        csv_reader = csv.reader(f)
+        for item in csv_reader:
+            data.append(item[0] + '.mp4')
+    count = 0
+    for file in data:
+        frames = get_frames(video_folder + file)
+        if frames != False:
+            subprocess.call(['mkdir', video_folder + file.split('.')[0]])
+            for i, frame in enumerate(frames):
+                Image.fromarray(np.asarray(frame)[:,:,::-1]).save(video_folder + file.split('.')[0] + '/' +  str(i) + '.jpg')
+                print(video_folder + file.split('.')[0] + '/' +  str(i) + '.jpg')
+        else:
+            print("Missing frame data for video: " + file)
+        count += 1
+        print("Progress: " + str(count) + "/" + str(len(data)))
+
+test_to_jpgs()

@@ -21,19 +21,27 @@ from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from scipy import signal
 
-# get layer activations
-activation = {}
-def get_activation(name):
-    def hook(model, input, output):
-        activation[name] = output.detach()
-    return hook
+def gkern(kernlen=21, std=None):
+    """Returns a 2D Gaussian kernel array."""
+    gkern1d = signal.gaussian(kernlen, std=std).reshape(kernlen, 1)
+    gkern2d = np.outer(gkern1d, gkern1d)
+    return gkern2d
 
+def cosine(kernsize=14, std=None):
+    kern1d = signal.cosine(kernsize).reshape(kernsize, 1)
+    kern2d = np.outer(kern1d, kern1d)
+    return kern2d
+def random(kernsize=14, std=None):
+    return torch.randn(kernsize, kernsize)
+    
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--testset',default='flickr',type=str,help='testset,(flickr or vggss)')
     parser.add_argument('--data_path', default='',type=str,help='Root directory path of data')
+    parser.add_argument('--og_data_path', default='',type=str,help='Root directory path of data')
     parser.add_argument('--image_size',default=224,type=int,help='Height and width of inputs')
     parser.add_argument('--gt_path',default='',type=str)
+    parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
     parser.add_argument('--batch_size', default=1, type=int, help='Batch Size')
     parser.add_argument('--epsilon', default=0.65, type=float, help='pos')
@@ -55,8 +63,7 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = nn.DataParallel(model)
     model = model.cuda()
-    model.module.imgnet.layer4.register_forward_hook(get_activation('layer4'))
-    checkpoint = torch.load(args.summaries_dir)
+    checkpoint = torch.load('pretrained/lvs_soundnet.pth.tar')
     model_dict = model.state_dict()
     pretrained_dict = checkpoint['model_state_dict']
     model_dict.update(pretrained_dict)
@@ -78,33 +85,35 @@ def main():
             args.gt_all[annotation['file']] = annotation['bbox']
 
     model.eval()
+    print('SOTA cIoU 0.7349397590361446')
+    print('SOTA auc 0.5778112449799198')
     iou = []
-    for step, (image, spec, audio, name, im) in enumerate(testdataloader):
-        print('%d / %d' % (step,len(testdataloader) - 1))
-        spec = Variable(spec).cuda()
-        image = Variable(image).cuda()
-        heatmap,_,Pos,Neg = model(image.float(),spec.float())
-        heatmap_arr =  heatmap.data.cpu().numpy()
-        for i in range(spec.shape[0]):
-            heatmap_now = cv2.resize(heatmap_arr[i,0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
-            heatmap_now = normalize_img(-heatmap_now)
-            gt_map = testset_gt(args, name[i])
-            pred = 1 - heatmap_now
-            threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
-            pred[pred>threshold] = 1
-            pred[pred<1] = 0
-            evaluator = Evaluator()
-            ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
-            iou.append(ciou)
-    results = []
-    for i in range(21):
-        result = np.sum(np.array(iou) >= 0.05 * i)
-        result = result / len(iou)
-        results.append(result)
-    x = [0.05 * i for i in range(21)]
-    auc_ = auc(x, results)
-    print('cIoU' , np.sum(np.array(iou) >= 0.5)/len(iou))
-    print('auc',auc_)
-
+    # center based gaussian
+    for std in range(10):
+        gaussian = gkern(14, std=(std+1))
+        for step, (image, spec, audio, name, im) in enumerate(testdataloader):
+            spec = Variable(spec).cuda()
+            image = Variable(image).cuda()
+            for i in range(spec.shape[0]):
+                gaussian_now = cv2.resize(gaussian, dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                gaussian_now = normalize_img(-gaussian_now)
+                gt_map = testset_gt(args, name[i])
+                pred = 1 - gaussian_now
+                threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
+                pred[pred>threshold] = 1
+                pred[pred<1] = 0
+                evaluator = Evaluator()
+                ciou,_,_ = evaluator.cal_CIOU(pred,gt_map,0.5)
+                iou.append(ciou)
+        results = []
+        for i in range(21):
+            result = np.sum(np.array(iou) >= 0.05 * i)
+            result = result / len(iou)
+            results.append(result)
+        x = [0.05 * i for i in range(21)]
+        auc_ = auc(x, results)
+        print('std', std+1)
+        print('cIoU' , np.sum(np.array(iou) >= 0.5)/len(iou))
+        print('auc',auc_)
 if __name__ == "__main__":
     main()
