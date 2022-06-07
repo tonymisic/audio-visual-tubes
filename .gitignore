@@ -12,6 +12,7 @@ checkpoints/
 imgs/
 videos/
 wandb/
+flownet/
 *__pycache__/*
 # Byte-compiled / optimized / DLL files
 __pycache__/

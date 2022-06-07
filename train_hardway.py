@@ -1,6 +1,5 @@
 from bdb import Breakpoint
-import os
-import torch
+import os, torch, wandb
 from torch.optim import *
 from torchvision.transforms import *
 import torch.nn as nn
@@ -14,12 +13,15 @@ from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
 import cv2, einops
 from sklearn.metrics import auc
 from PIL import Image
-from losses import NPRatio
+# flow net and loss
+from losses import FlowLoss
+from flownet.models import FlowNet2
+
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1,5,6"
 import warnings
 warnings.filterwarnings('ignore')
-import wandb
+
 train = True
 test = False
 test_hardway = False
@@ -40,7 +42,7 @@ if record:
             "batch_size": 20
         }
     )
-    wandb.run.name = "16-10k, HardWay"
+    wandb.run.name = "16-10k, HardWay, FlowLoss"
     wandb.run.save()
 
 def get_arguments():
@@ -113,7 +115,7 @@ def main():
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
-    #criterion2 = NPRatio(14 * 14)
+    criterion2 = FlowLoss(14 * 14)
     print("Loaded dataloader and loss function.")
     # Optimizers
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -131,12 +133,12 @@ def main():
                 spec = Variable(spec).cuda()
                 spec = spec.unsqueeze(2).repeat(1, 1, 16, 1, 1)
                 spec = einops.rearrange(spec, 'b c t h w -> (b t) c h w')
-                heatmap, out, _, _ = model(einops.rearrange(frames, 'b c t h w -> (b t) c h w').float(), spec.float())
+                frames = einops.rearrange(frames, 'b c t h w -> (b t) c h w')
+                heatmap, out, _, _ = model(frames.float(), spec.float())
                 heatmap = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
                 target = torch.zeros(out.shape[0]).cuda().long()
-                loss = criterion(out, target)
+                loss = criterion(out, target) # usually scaled max: 4.4 min: 4.1 
                 #loss2 = criterion2(heatmap, 0.65, device)
-                #summed_loss = torch.add(loss * 0.5, (loss2 * 400) * 0.5)
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
