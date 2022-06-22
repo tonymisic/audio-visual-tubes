@@ -1,5 +1,6 @@
 import os, torch, wandb, torch.nn as nn, numpy as np, argparse, cv2, einops, warnings
 from torch.optim import *
+from torch.nn.functional import grid_sample
 from torchvision.transforms import *
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
@@ -8,6 +9,8 @@ from model import AVENet
 from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
 from sklearn.metrics import auc
 from PIL import Image
+from flownet2.models import FlowNet2
+from losses import FlowLoss
 warnings.filterwarnings('ignore')
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -41,7 +44,7 @@ def get_arguments():
     parser.add_argument('--testset',default='flickr',type=str,help='testset,(flickr or vggss)') 
     parser.add_argument('--data_path', default='',type=str,help='Root directory path of data')
     parser.add_argument('--og_data_path', default='',type=str,help='Root directory path of data')
-    parser.add_argument('--image_size',default=224,type=int,help='Height and width of inputs')
+    parser.add_argument('--image_size',default=256,type=int,help='Height and width of inputs')
     parser.add_argument('--gt_path',default='',type=str)
     parser.add_argument('--og_gt_path',default='',type=str)
     parser.add_argument('--summaries_dir',default='',type=str,help='Model path')
@@ -60,6 +63,9 @@ def get_arguments():
     parser.add_argument('--frame_density',default=16,type=int,help='Training frame sampling density')
     # new arguments
     parser.add_argument('--sampling_rate', default=16, type=int,help='Sampling rate for frame selection')
+    # flownet args
+    parser.add_argument("--rgb_max", type=float, default = 255.)
+    parser.add_argument('--fp16', action='store_true', help='Run model in pseudo-fp16 mode (fp16 storage fp32 math).')
     return parser.parse_args() 
 
 def save_image(image, recording_name, pred=None, gt_map=None):
@@ -85,6 +91,20 @@ def main():
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
+    checkpoint = torch.load('pretrained/lvs_soundnet.pth.tar')
+    model_dict = model.state_dict()
+    pretrained_dict = checkpoint['model_state_dict']
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+
+    flow_model = FlowNet2(args)
+    flow_model = flow_model.cuda() 
+    flow_model = nn.DataParallel(flow_model)
+    flow_model.to(device)
+    print('load pretrained')
+    checkpoint = torch.load('flownet2/FlowNet2_checkpoint.pth.tar')
+    flow_model.module.load_state_dict(checkpoint['state_dict'])
+    flow_model.eval()
     # init datasets
     dataset = SubSampledFlickr(args,  mode='train', subset=10)
     testdataset = PerFrameLabels(args, mode='test')
@@ -94,6 +114,7 @@ def main():
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
+    criterion2 = FlowLoss(14 * 14)
     print("Loaded dataloader and loss function.")
     # Optimizers
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -108,19 +129,37 @@ def main():
             running_loss = 0.0
             for step, (frames, spec, _, _, name) in enumerate(dataloader):
                 print("Training Step: " + str(step) + "/" + str(len(dataloader)))
+                # flow prediction from FlowNet2
+                flow_frames = torch.cat((einops.rearrange(frames[:, :, :-1, :, :], 'b c t h w -> (b t) c h w').unsqueeze(2),
+                                        einops.rearrange(frames[:, :, 1:, :, :], 'b c t h w -> (b t) c h w').unsqueeze(2)), dim=2)
+                flows = flow_model(flow_frames).permute(0,2,3,1)
+                # Vanilla Hard Way Loss
                 spec = Variable(spec).cuda()
-                spec = spec.unsqueeze(2).repeat(1, 1, 16, 1, 1)
-                spec = einops.rearrange(spec, 'b c t h w -> (b t) c h w')
+                spec = einops.rearrange(spec.unsqueeze(2).repeat(1, 1, 16, 1, 1), 'b c t h w -> (b t) c h w')
                 frames = einops.rearrange(frames, 'b c t h w -> (b t) c h w')
                 heatmap, out, _, _ = model(frames.float(), spec.float())
-                heatmap = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
                 target = torch.zeros(out.shape[0]).cuda().long()
-                loss = criterion(out, target) # usually scaled max: 4.4 min: 4.1 
-                #loss2 = criterion2(heatmap, 0.65, device)
+                hardway_loss = criterion(out, target)
+                # Flow loss from: "Unsupervised Temporal Consistency Metric for Video Segmentation in Highly-Automated Driving"
+                heatmap = heatmap.reshape(args.batch_size,args.frame_density, 16, 16)
+                heatmap = torchvision.transforms.Resize(size=args.image_size)(heatmap)
+                heatmap = normalize_img(-heatmap)
+                pred = 1 - heatmap
+                cpu_pred = pred.detach().cpu()
+                threshold = np.sort(cpu_pred.flatten())[int(cpu_pred.nelement() / 2)]
+                pred[pred>threshold] = 1
+                pred[pred<1] = 0
+                skewed_pred = grid_sample(einops.rearrange(pred[:,:-1,:], 'b t h w -> (b t) h w').unsqueeze(1), flows, mode='bilinear')
+                original_pred = einops.rearrange(pred[:,1:,:], 'b t h w -> (b t) h w').unsqueeze(1)
+                skewed_pred[0:15]
+                original_pred[0:15]
+                frames[0:16]
+                flow2img(flows[0])
                 optim.zero_grad()
-                loss.backward()
+                hardway_loss.backward()
                 optim.step()
-                running_loss += float(loss)
+                running_loss += float(hardway_loss)
+
             final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
@@ -202,6 +241,8 @@ def main():
                 print("Hardway Test auc ", auc_)
                 if record:
                     wandb.log({ "Hardway Test cIoU": np.sum(np.array(iou) >= 0.5)/len(iou), "Hardway Test AUC": auc_})
+
+        
         if save:
             torch.save({
                     'epoch': epoch,

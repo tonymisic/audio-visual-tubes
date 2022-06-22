@@ -190,7 +190,7 @@ class SubSampledFlickr(Dataset):
     
     def _load_video(self, path):
         indicies = list(range(self.training_samplerate))
-        random.shuffle(indicies) # randomize order of frames
+        #random.shuffle(indicies) # randomize order of frames
         if self.mode == 'train':
             frames = []
             for i in indicies:
@@ -343,7 +343,7 @@ class PerFrameLabels(Dataset):
             return self.previous_video
         success, image = cap.read()
         while success:
-            frames.append(image)
+            frames.append(image[:,:,::-1])
             success, image = cap.read()
         cap.release()
         if len(frames) <= 1:
