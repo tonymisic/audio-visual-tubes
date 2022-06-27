@@ -8,17 +8,18 @@ from model import AVENet
 from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
 from sklearn.metrics import auc
 from PIL import Image
+from losses import PropagationLoss
 warnings.filterwarnings('ignore')
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]="0,3,5,6"
 
 train = True
-test = False
-test_hardway = False
-record = False
+test = True
+test_hardway = True
+record = True
 record_qualitative = False
-save = False
+save = True
 selected_whole_qualitative = ['2432219254.mp4', '3484198977.mp4', '3727937033.mp4', '6458319057.mp4', '10409146004.mp4']
 if record:
     wandb.init(entity="tonymisic", project="Audio-Visual Tubes",
@@ -27,12 +28,12 @@ if record:
             "dataset": "flickr10k",
             "testset": 69,
             "frames": 16,
-            "lr": 1e-6,
+            "lr": 4e-6,
             "epochs": 200,
             "batch_size": 20
         }
     )
-    wandb.run.name = "16-10k, HardWay, FlowLoss"
+    wandb.run.name = "16-10k, HardWay, Consistency"
     wandb.run.save()
 
 def get_arguments():
@@ -53,13 +54,14 @@ def get_arguments():
     parser.add_argument('--Neg',action='store_true')
     parser.set_defaults(Neg=True)
     # from training code
-    parser.add_argument('--learning_rate',default=1e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
+    parser.add_argument('--learning_rate',default=4e-6,type=float,help='Initial learning rate (divided by 10 while training by lr scheduler)')
     parser.add_argument('--weight_decay', default=1e-4, type=float, help='Weight Decay')
-    parser.add_argument('--n_threads',default=4,type=int,help='Number of threads for multi-thread loading')
+    parser.add_argument('--n_threads',default=5,type=int,help='Number of threads for multi-thread loading')
     parser.add_argument('--epochs',default=200,type=int,help='Number of total epochs to run')
     parser.add_argument('--frame_density',default=16,type=int,help='Training frame sampling density')
     # new arguments
     parser.add_argument('--sampling_rate', default=16, type=int,help='Sampling rate for frame selection')
+    parser.add_argument('--loss_weight', default=0.5, type=float,help='Loss weighting')
     return parser.parse_args() 
 
 def save_image(image, recording_name, pred=None, gt_map=None):
@@ -85,15 +87,21 @@ def main():
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
+    # checkpoint = torch.load('pretrained/lvs_soundnet.pth.tar')
+    # model_dict = model.state_dict()
+    # pretrained_dict = checkpoint['model_state_dict']
+    # model_dict.update(pretrained_dict)
+    # model.load_state_dict(model_dict)
     # init datasets
     dataset = SubSampledFlickr(args,  mode='train', subset=10)
     testdataset = PerFrameLabels(args, mode='test')
     original_testset = GetAudioVideoDataset(args, mode='test')
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.n_threads)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.n_threads)
     testdataloader = DataLoader(testdataset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
+    criterion2 = PropagationLoss()
     print("Loaded dataloader and loss function.")
     # Optimizers
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -113,19 +121,20 @@ def main():
                 spec = einops.rearrange(spec, 'b c t h w -> (b t) c h w')
                 frames = einops.rearrange(frames, 'b c t h w -> (b t) c h w')
                 heatmap, out, _, _ = model(frames.float(), spec.float())
-                heatmap = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
+                attention = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
                 target = torch.zeros(out.shape[0]).cuda().long()
-                loss = criterion(out, target) # usually scaled max: 4.4 min: 4.1 
-                #loss2 = criterion2(heatmap, 0.65, device)
+                hardway_loss = rescale_loss(criterion(out, target), 4.1, 4.4) # usually scaled max: 4.4 min: 4.1 
+                consistency_loss = rescale_loss(criterion2(attention), 0, 0.015) # usually scaled max: 0.015 min: 0
+                combined_loss = torch.add(hardway_loss * args.loss_weight, consistency_loss * (1 - args.loss_weight))
                 optim.zero_grad()
-                loss.backward()
+                combined_loss.backward()
                 optim.step()
-                running_loss += float(loss)
+                running_loss += float(combined_loss)
             final_loss = running_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
             if record:
-                wandb.log({ "loss": final_loss
+                wandb.log({ "loss": final_loss, "hardway loss": hardway_loss, "consistency loss": consistency_loss 
                 })
         
         if test:
@@ -207,7 +216,7 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_16frm_10k_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_16frm_10k_consistency_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()

@@ -191,6 +191,9 @@ def flow2img(flow_data):
 
 	return np.uint8(img)
 
+def rescale_loss(value, min, max, new_min=0, new_max=1):
+    return ((value - min) / (max - min)) * (new_max - new_min) + new_min
+
 class Evaluator():
 
     def __init__(self):

@@ -17,18 +17,11 @@ class NPRatio(torch.nn.Module):
         loss = torch.abs(torch.diff(ratios, dim=1)).to(device)
         return torch.divide(torch.sum(loss), loss.size(0) * loss.size(1))
 
-class FlowLoss(torch.nn.Module):
-    """Flow Loss
+class PropagationLoss(torch.nn.Module):
     """
-    def __init__(self, img_size=None):
-        super(FlowLoss, self).__init__()
-        assert img_size != None
-        self.img_size = img_size
+    """
+    def __init__(self):
+        super(PropagationLoss, self).__init__()
         
-    def forward(self, attention, threshold, device):
-        loss = torch.tensor([attention.size(0)]).to(device)
-        attention[attention > threshold] = 1
-        attention[attention < 1] = 0
-        ratios = torch.divide(torch.sum(attention, dim=1), self.img_size)
-        loss = torch.abs(torch.diff(ratios, dim=1))
-        return torch.sum(loss)
+    def forward(self, heatmap):
+        return torch.abs(torch.diff(heatmap, dim=1)).mean(dim=(2,3)).mean(dim=1).mean(dim=0)
