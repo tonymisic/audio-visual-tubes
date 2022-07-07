@@ -1,4 +1,4 @@
-import csv
+from scipy import signal
 import os
 import torch
 from torch.optim import *
@@ -190,6 +190,12 @@ def flow2img(flow_data):
 	img[idx] = 0
 
 	return np.uint8(img)
+
+def gkern(kernlen=21, std=None):
+    """Returns a 2D Gaussian kernel array."""
+    gkern1d = signal.gaussian(kernlen, std=std).reshape(kernlen, 1)
+    gkern2d = np.outer(gkern1d, gkern1d)
+    return gkern2d
 
 def rescale_loss(value, min, max, new_min=0, new_max=1):
     return ((value - min) / (max - min)) * (new_max - new_min) + new_min

@@ -164,6 +164,15 @@ class SubSampledFlickr(Dataset):
 			    volume_transforms.ClipToTensor(),
                 video_transforms.Normalize(mean, std)
             ])
+            self.video_transform2 = video_transforms.Compose([
+                video_transforms.Resize(int(self.imgSize * 1.1), interpolation='bicubic'),
+                video_transforms.RandomCrop(self.imgSize),
+                video_transforms.ColorJitter(),
+                video_transforms.RandomHorizontalFlip(),
+                video_transforms.CenterCrop(self.imgSize),
+			    volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean, std)
+            ])
         else:  
             self.video_transform = video_transforms.Compose([
                 video_transforms.Resize(self.imgSize, interpolation='bicubic'),
@@ -246,12 +255,12 @@ class SubSampledFlickr(Dataset):
         # Audio
         samples, samplerate = sf.read(self.audio_path + file[:-3] +'wav')
         # Video
-        #start_time = time.time()
         if self.middle_sample:
             frames = self.img_transform(self._load_middleframe(self.video_path + file[:-4] + '/8.jpg'))
         else:
-            frames = self.video_transform(self._load_video(self.video_path + file[:-4] + '/'))
-        #print("Completed video ID: " + str(idx) + " Time taken: %ss" % (round(time.time() - start_time, 2)))
+            frames = self._load_video(self.video_path + file[:-4] + '/')
+            no_augment_frames = self.video_transform(frames)
+            augment_frames = self.video_transform2(frames)
         # repeat if audio is too short
         if samples.shape[0] < samplerate * 10:
             n = int(samplerate * 10 / samples.shape[0]) + 1
@@ -262,7 +271,7 @@ class SubSampledFlickr(Dataset):
         _, _, spectrogram = signal.spectrogram(resamples,samplerate, nperseg=512, noverlap=1)
         spectrogram = np.log(spectrogram+ 1e-7)
         spectrogram = self.aid_transform(spectrogram)
-        return frames, spectrogram, resamples, samplerate, file
+        return no_augment_frames, augment_frames, spectrogram, resamples, samplerate, file
 
 class PerFrameLabels(Dataset):
     def __init__(self, args, mode='test', transforms=None):

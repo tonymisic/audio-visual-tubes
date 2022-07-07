@@ -8,7 +8,7 @@ from model import AVENet
 from datasets import SubSampledFlickr, GetAudioVideoDataset, PerFrameLabels
 from sklearn.metrics import auc
 from PIL import Image
-from losses import PropagationLoss
+from losses import FlipLoss, PropagationLoss, NPRatio
 warnings.filterwarnings('ignore')
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -33,7 +33,7 @@ if record:
             "batch_size": 20
         }
     )
-    wandb.run.name = "16-10k, HardWay, Consistency"
+    wandb.run.name = "16-10k, HardWay, FlipLR Loss"
     wandb.run.save()
 
 def get_arguments():
@@ -61,7 +61,9 @@ def get_arguments():
     parser.add_argument('--frame_density',default=16,type=int,help='Training frame sampling density')
     # new arguments
     parser.add_argument('--sampling_rate', default=16, type=int,help='Sampling rate for frame selection')
-    parser.add_argument('--loss_weight', default=0.5, type=float,help='Loss weighting')
+    parser.add_argument('--loss_weight', default=0.1, type=float,help='Loss weighting')
+    parser.add_argument('--use_pretrained', default=False, type=bool,help='Load pretrained model for testing')
+    parser.add_argument('--epoch_threshold', default=10, type=int,help='Epoch to switch loss weighting on')
     return parser.parse_args() 
 
 def save_image(image, recording_name, pred=None, gt_map=None):
@@ -87,21 +89,23 @@ def main():
     model = model.cuda() 
     model = nn.DataParallel(model)
     model.to(device)
-    # checkpoint = torch.load('pretrained/lvs_soundnet.pth.tar')
-    # model_dict = model.state_dict()
-    # pretrained_dict = checkpoint['model_state_dict']
-    # model_dict.update(pretrained_dict)
-    # model.load_state_dict(model_dict)
+    if args.use_pretrained:
+        checkpoint = torch.load('checkpoints/model_16frm_10k_consistency0.1_ep9.pth.tar')
+        model_dict = model.state_dict()
+        pretrained_dict = checkpoint['model_state_dict']
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
     # init datasets
     dataset = SubSampledFlickr(args,  mode='train', subset=10)
     testdataset = PerFrameLabels(args, mode='test')
     original_testset = GetAudioVideoDataset(args, mode='test')
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.n_threads)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.n_threads)
     testdataloader = DataLoader(testdataset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     originaldataloader = DataLoader(original_testset, batch_size=1, shuffle=False, num_workers=args.n_threads)
     # loss
     criterion = nn.CrossEntropyLoss()
     criterion2 = PropagationLoss()
+    criterion3 = FlipLoss()
     print("Loaded dataloader and loss function.")
     # Optimizers
     optim = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -113,8 +117,8 @@ def main():
     for epoch in range(args.epochs):
         if train:
             model.train()
-            running_loss = 0.0
-            for step, (frames, spec, _, _, name) in enumerate(dataloader):
+            running_loss, running_hardway_loss, running_consistency_loss, runnning_flipLR_loss = 0.0, 0.0, 0.0, 0.0
+            for step, (frames, augmented, spec, _, _, name) in enumerate(dataloader):
                 print("Training Step: " + str(step) + "/" + str(len(dataloader)))
                 spec = Variable(spec).cuda()
                 spec = spec.unsqueeze(2).repeat(1, 1, 16, 1, 1)
@@ -123,18 +127,30 @@ def main():
                 heatmap, out, _, _ = model(frames.float(), spec.float())
                 attention = heatmap.reshape(args.batch_size,args.frame_density, 14, 14)
                 target = torch.zeros(out.shape[0]).cuda().long()
-                hardway_loss = rescale_loss(criterion(out, target), 4.1, 4.4) # usually scaled max: 4.4 min: 4.1 
-                consistency_loss = rescale_loss(criterion2(attention), 0, 0.015) # usually scaled max: 0.015 min: 0
-                combined_loss = torch.add(hardway_loss * args.loss_weight, consistency_loss * (1 - args.loss_weight))
+                hardway_loss = criterion(out, target) * args.loss_weight
+                consistency_loss = criterion2(attention) * (1 - args.loss_weight)
+                
+                flipped_frames = RandomHorizontalFlip(p=1)(frames) #always flipped
+                flipped_heatmap, _, _, _ = model(flipped_frames.float(), spec.float())
+                #flipLR_loss = criterion3(heatmap, flipped_heatmap) 
+                flipLR_loss = criterion3(heatmap, flipped_heatmap) * (1 - args.loss_weight)
+                #combined_loss = torch.add(torch.add(hardway_loss, consistency_loss), flipLR_loss)
+                combined_loss = torch.add(hardway_loss, flipLR_loss)
                 optim.zero_grad()
                 combined_loss.backward()
                 optim.step()
                 running_loss += float(combined_loss)
+                running_hardway_loss += float(hardway_loss)
+                running_consistency_loss += float(consistency_loss)
+                runnning_flipLR_loss += float(flipLR_loss)
             final_loss = running_loss / float(step + 1)
+            combined_hardway_loss = running_hardway_loss / float(step + 1)
+            combined_consistency_loss = running_consistency_loss / float(step + 1)
+            combined_flipLR_loss = runnning_flipLR_loss / float(step + 1)
             print("Epoch " + str(epoch) + " training done.")
             scheduler.step()
             if record:
-                wandb.log({ "loss": final_loss, "hardway loss": hardway_loss, "consistency loss": consistency_loss 
+                wandb.log({ "loss": final_loss, "hardway loss": combined_hardway_loss, "consistency loss": combined_consistency_loss, "flipLR loss": combined_flipLR_loss
                 })
         
         if test:
@@ -149,7 +165,7 @@ def main():
                         heatmap, out, _, _ = model(frames[:,:,i,:,:].float(), spec.float())
                         target = torch.zeros(out.shape[0]).cuda().long() 
                         heatmap_arr =  heatmap.data.cpu().numpy()
-                        heatmap_now = cv2.resize(heatmap_arr[0, 0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                        heatmap_now = cv2.resize(heatmap_arr[0,0], dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
                         heatmap_now = normalize_img(-heatmap_now)
                         pred = 1 - heatmap_now
                         threshold = np.sort(pred.flatten())[int(pred.shape[0] * pred.shape[1] / 2)]
@@ -211,12 +227,13 @@ def main():
                 print("Hardway Test auc ", auc_)
                 if record:
                     wandb.log({ "Hardway Test cIoU": np.sum(np.array(iou) >= 0.5)/len(iou), "Hardway Test AUC": auc_})
+        
         if save:
             torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict()
-                }, args.summaries_dir + 'model_16frm_10k_consistency_ep%s.pth.tar' % (str(epoch)) 
+                }, args.summaries_dir + 'model_16frm_10k_flip_ep%s.pth.tar' % (str(epoch)) 
             )
 if __name__ == "__main__":
     main()
