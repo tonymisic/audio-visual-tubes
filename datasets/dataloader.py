@@ -161,15 +161,14 @@ class SubSampledFlickr(Dataset):
                 video_transforms.RandomCrop(self.imgSize),
                 video_transforms.RandomHorizontalFlip(),
                 video_transforms.CenterCrop(self.imgSize),
-			    volume_transforms.ClipToTensor(),
-                video_transforms.Normalize(mean, std)
             ])
             self.video_transform2 = video_transforms.Compose([
-                video_transforms.Resize(int(self.imgSize * 1.1), interpolation='bicubic'),
-                video_transforms.RandomCrop(self.imgSize),
-                video_transforms.ColorJitter(),
+                video_transforms.RandomCrop(int(self.imgSize * 0.7)),
+                video_transforms.ColorJitter(0.5, 0.5, 0.5, 0.5),
+                video_transforms.Resize(self.imgSize, interpolation='bicubic'),
                 video_transforms.RandomHorizontalFlip(),
-                video_transforms.CenterCrop(self.imgSize),
+            ])
+            self.normalize_transform = video_transforms.Compose([
 			    volume_transforms.ClipToTensor(),
                 video_transforms.Normalize(mean, std)
             ])
@@ -260,7 +259,8 @@ class SubSampledFlickr(Dataset):
         else:
             frames = self._load_video(self.video_path + file[:-4] + '/')
             no_augment_frames = self.video_transform(frames)
-            augment_frames = self.video_transform2(frames)
+            augment_frames = self.normalize_transform(self.video_transform2(no_augment_frames))
+            no_augment_frames = self.normalize_transform(no_augment_frames)
         # repeat if audio is too short
         if samples.shape[0] < samplerate * 10:
             n = int(samplerate * 10 / samples.shape[0]) + 1

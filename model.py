@@ -1,3 +1,4 @@
+from cv2 import threshold
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -85,12 +86,12 @@ def normalize_img(value, vmax=None, vmin=None):
 
 class AVENet(nn.Module):
 
-    def __init__(self, args):
+    def __init__(self, args, pretrained):
         super(AVENet, self).__init__()
 
         # -----------------------------------------------
-        self.imgnet = base_models.resnet18(modal='vision', pretrained=True)
-        self.audnet = base_models.resnet18(modal='audio')
+        self.imgnet = base_models.resnet18(modal='vision', pretrained=pretrained)
+        self.audnet = base_models.resnet18(modal='audio', pretrained=pretrained)
         self.m = nn.Sigmoid()
         self.avgpool = nn.AdaptiveMaxPool2d((1, 1))
 
@@ -144,4 +145,10 @@ class AVENet(nn.Module):
         else:
             logits = torch.cat((sim1,sim),1)/0.07
         
-        return A,logits,Pos,Neg
+        norm_pos = F.normalize(Pos, dim=(2,3))
+        #thresholds = torch.flatten(torch.sort(norm_pos, dim=2).values, start_dim=2)[:,:,int(196 * 0.7)] # top 30% of pixels via heatmap
+        #norm_pos = norm_pos * (norm_pos.squeeze().flatten(start_dim=1) > thresholds).float().reshape(Pos.size(0), 14, 14).unsqueeze(1)
+        #weighted_A = (img * norm_pos).mean(dim=(2,3))
+        weighted_A = (img * norm_pos).mean(dim=1)
+        #weighted_A = (img * Pos).mean(dim=(2,3))
+        return A, logits, weighted_A, Pos, Neg
